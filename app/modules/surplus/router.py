@@ -152,7 +152,33 @@ async def export_xlsx(
     )
 
 
-_MAX_IMAGE = 8 * 1024 * 1024
+_MAX_FILE = 10 * 1024 * 1024
+_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+def _kind(f: UploadFile) -> str:
+    name = (f.filename or "").lower()
+    mt = (f.content_type or "").lower()
+    if mt in _IMAGE_TYPES or name.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return "image"
+    if mt == "application/pdf" or name.endswith(".pdf"):
+        return "pdf"
+    if name.endswith((".xlsx", ".xlsm")) or "spreadsheetml" in mt:
+        return "xlsx"
+    if name.endswith(".csv") or mt == "text/csv":
+        return "csv"
+    if name.endswith((".txt", ".text")) or mt.startswith("text/"):
+        return "txt"
+    return "?"
+
+
+def _decode(data: bytes) -> str:
+    for enc in ("utf-8-sig", "cp1251"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="ignore")
 
 
 @router.post("/recognize", response_model=s.RecognizeOut)
@@ -161,29 +187,57 @@ async def recognize(
     text: str | None = Form(default=None),
     files: list[UploadFile] | None = File(default=None),
 ):
-    """Фото (до 5 штук) або текст → рядки «матеріал / вага» для однієї колонки."""
+    """Фото/скріни, файли (Excel, CSV, TXT, PDF) або текст → рядки «матеріал / вага» для однієї колонки."""
     materials = await service.list_materials(session)
     matcher = rec.Matcher(materials)
     names = {m.id: m.name for m in materials}
+    found_date = None
+    items: list[rec.Item] = []
     if files:
         if len(files) > 5:
-            raise HTTPException(422, L("Не більше 5 фото за раз", "Не больше 5 фото за раз"))
-        images = []
+            raise HTTPException(422, L("Не більше 5 файлів за раз", "Не больше 5 файлов за раз"))
+        to_claude: list[tuple[bytes, str]] = []
         for f in files:
             data = await f.read()
-            if len(data) > _MAX_IMAGE:
-                raise HTTPException(413, L("Фото завелике (макс. 8 МБ)", "Фото слишком большое (макс. 8 МБ)"))
-            mt = f.content_type or "image/jpeg"
-            if mt not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
-                raise HTTPException(415, L("Підтримуються JPEG, PNG, WebP", "Поддерживаются JPEG, PNG, WebP"))
-            images.append((data, mt))
-        found_date, items = await rec.parse_images(images, materials, matcher)
-        source = "photo"
+            if len(data) > _MAX_FILE:
+                raise HTTPException(413, L("Файл завеликий (макс. 10 МБ)", "Файл слишком большой (макс. 10 МБ)"))
+            kind = _kind(f)
+            if kind == "image":
+                to_claude.append((data, f.content_type if f.content_type in _IMAGE_TYPES else "image/jpeg"))
+            elif kind == "pdf":
+                to_claude.append((data, "application/pdf"))
+            elif kind == "xlsx":
+                from io import BytesIO
+
+                from openpyxl import load_workbook
+                try:
+                    wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
+                except Exception:
+                    raise HTTPException(422, L("Не вдалося відкрити Excel-файл", "Не удалось открыть Excel-файл")) from None
+                for ws in wb.worksheets:
+                    items += rec.parse_table([list(r) for r in ws.iter_rows(values_only=True)], matcher)
+            elif kind == "csv":
+                import csv
+                raw = _decode(data)
+                dialect = csv.Sniffer().sniff(raw[:2000], delimiters=",;\t") if raw.strip() else csv.excel
+                items += rec.parse_table(list(csv.reader(raw.splitlines(), dialect)), matcher)
+            elif kind == "txt":
+                d, its = rec.parse_text(_decode(data), matcher)
+                found_date = found_date or d
+                items += its
+            else:
+                raise HTTPException(415, L("Підтримуються фото, PDF, Excel (.xlsx), CSV і TXT",
+                                           "Поддерживаются фото, PDF, Excel (.xlsx), CSV и TXT"))
+        if to_claude:
+            d, its = await rec.parse_images(to_claude, materials, matcher)
+            found_date = found_date or d
+            items += its
+        source = "photo" if to_claude else "file"
     elif text and text.strip():
         found_date, items = rec.parse_text(text, matcher)
         source = "text"
     else:
-        raise HTTPException(422, L("Додайте фото або текст", "Добавьте фото или текст"))
+        raise HTTPException(422, L("Додайте фото, файл або текст", "Добавьте фото, файл или текст"))
     return s.RecognizeOut(
         source=source,
         date=found_date,

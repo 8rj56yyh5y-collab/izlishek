@@ -32,9 +32,9 @@ function edit(id: number | null) {
 <template>
   <q-page class="page">
     <div class="row items-center q-mb-md">
-      <h1 class="mg-h">{{ t('sh.title') }}</h1>
+      <h1 class="mg-h">{{ t('sh.listTitle') }}</h1>
       <q-space />
-      <q-btn unelevated no-caps color="primary" icon="add" :label="t('sh.new')" @click="edit(null)" />
+      <q-btn unelevated no-caps color="primary" icon="compare_arrows" :label="t('sh.new')" to="/reconcile" />
     </div>
     <PeriodFilter v-model="period" class="q-mb-md" />
 

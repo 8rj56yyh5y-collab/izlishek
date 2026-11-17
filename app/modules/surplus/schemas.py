@@ -229,7 +229,7 @@ class RecognizedItem(BaseModel):
 
 
 class RecognizeOut(BaseModel):
-    source: str  # text | photo
+    source: str  # text | photo | file
     date: date | None
     items: list[RecognizedItem]
 

@@ -32,8 +32,6 @@ _LOOKALIKE = str.maketrans({"а": "a", "с": "c", "е": "e", "о": "o", "р": "p
                             "і": "i", "у": "y", "т": "t", "м": "m", "н": "h", "в": "b", "ї": "i", "ё": "e"})
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
 _KG = re.compile(r"\b(?:кг|kg)\b\.?", re.IGNORECASE)
-# «назва [роздільник] вага [вага2]» — одна або дві ваги в кінці рядка
-_LINE = re.compile(r"^(.*?)[\s:=–\-|]*(\d+(?:[.,]\d+)?(?:[\s/|;–\-]+\d+(?:[.,]\d+)?)?)\s*$")
 _DATE_LINE = re.compile(r"^\s*(\d{1,2})[.,/](\d{1,2})(?:[.,/](\d{2,4}))?\s*$")
 
 
@@ -65,19 +63,24 @@ class Matcher:
         self.entries.sort(key=lambda e: -len(e[0]))
         self.by_name = {m.name: m.id for m in materials}
 
-    def match(self, raw: str) -> int | None:
+    def best(self, raw: str) -> tuple[int, int, int] | None:
+        """(material_id, довжина аліаса, позиція в назві) найкращого збігу або None."""
         n = _norm(raw)
         if not n:
             return None
-        toks = set(_tokens(n))
-        for alias, mid in self.entries:
+        toks = _tokens(n)
+        for alias, mid in self.entries:  # відсортовано від найдовших
             # Короткі аліаси («al», «cu») — лише цілим словом, інакше ловлять що завгодно.
             if len(alias) <= 3 and alias.isalnum():
                 if alias in toks:
-                    return mid
+                    return mid, len(alias), n.find(alias)
             elif alias in n:
-                return mid
+                return mid, len(alias), n.find(alias)
         return None
+
+    def match(self, raw: str) -> int | None:
+        b = self.best(raw)
+        return b[0] if b else None
 
 
 def _num(s: str) -> float:
@@ -94,28 +97,107 @@ def _parse_date(d: str, m: str, y: str | None) -> date | None:
         return None
 
 
+_NUM_TOKEN = re.compile(r"^\d+(?:[.,]\d+)?$")
+
+
+def _tokenize(chunk: str) -> list[str]:
+    chunk = _KG.sub(" ", chunk)
+    chunk = re.sub(r"(\d)\s*[/|]\s*(\d)", r"\1 \2", chunk)        # «71,9/65,7» → дві ваги
+    chunk = re.sub(r"\s[:=–\-|/]\s|[:=]", " ", chunk)                # роздільники між назвою і вагою
+    toks = [x.strip(",.;:") if _NUM_TOKEN.match(x.strip(",.;:")) else x.rstrip(",;:") for x in chunk.split()]
+    return [x for x in toks if x]
+
+
+def _split_groups(toks: list[str], matcher: Matcher) -> list[tuple[str, list[float]]]:
+    """Ділить послідовність токенів на групи «назва вага [вага2]».
+
+    Дозволяє писати все в один рядок («AL 71,9 Cu 37,85 Латунь 34,45»), не ламаючи
+    назви з числами («Медь 1 сорт 37,85»): з кількох можливих меж обираємо ту, де назва
+    найкраще впізнається; назва з числом усередині має починатися з упізнаного аліаса.
+    """
+    is_num = [bool(_NUM_TOKEN.match(x)) for x in toks]
+    groups: list[tuple[str, list[float]]] = []
+    i = 0
+    while i < len(toks):
+        while i < len(toks) and is_num[i]:   # числа без назви на початку — пропускаємо
+            i += 1
+        if i >= len(toks):
+            break
+        best: tuple[tuple[int, int], int, str, list[float]] | None = None
+        for j in range(i + 1, len(toks) + 1):
+            # межа: після числа, і далі слово або кінець
+            if not is_num[j - 1] or (j < len(toks) and is_num[j]):
+                continue
+            k = j
+            while k > i and is_num[k - 1] and j - k < 2:
+                k -= 1
+            name_toks, nums = toks[i:k], [_num(x) for x in toks[k:j]]
+            if not name_toks:
+                continue
+            name = " ".join(name_toks)
+            if not re.search(r"[^\W\d_]", name):
+                continue
+            m = matcher.best(name)
+            inner_num = any(is_num[x] for x in range(i, k))
+            if m and inner_num and m[2] != 0:
+                m = None  # «АЛ 5 АЛ профиль» — це дві групи, а не одна назва
+            score = (m[1] if m else 0, -j)
+            if best is None or score > best[0]:
+                best = (score, j, name, nums)
+        if best is None:
+            break
+        _, j, name, nums = best
+        groups.append((name, nums))
+        i = j
+    return groups
+
+
 def parse_text(text: str, matcher: Matcher) -> tuple[date | None, list[Item]]:
+    """Текст будь-якого вигляду: по рядку на матеріал, через «;» або все в один рядок."""
     found_date: date | None = None
     items: list[Item] = []
-    for line in text.splitlines():
-        line = line.strip().strip("|•-*")
-        if not line:
+    for chunk in re.split(r"[\n;]+", text):
+        chunk = chunk.strip().strip("|•*")
+        if not chunk:
             continue
-        dm = _DATE_LINE.match(line)
+        dm = _DATE_LINE.match(chunk)
         if dm:
             found_date = found_date or _parse_date(*dm.groups())
             continue
-        m = _LINE.match(_KG.sub(" ", line))
-        if not m:
-            continue
-        name = m.group(1).strip(" :=-–|\t")
-        # Вага — числа В КІНЦІ рядка; числа всередині назви («Медь 1 сорт», «Н/Ж (10%)») — частина назви.
-        nums = [_num(x) for x in _NUM.findall(m.group(2))]
-        if not name or not re.search(r"[^\W\d_]", name):
-            continue
-        items.append(Item(raw=name, material_id=matcher.match(name), kg=nums[0],
-                          kg2=nums[1] if len(nums) > 1 else None))
+        # дата на початку рядка: «03.07 AL 71,9 …»
+        dm = re.match(r"^\s*(\d{1,2})\.(\d{2})(?:\.(\d{2,4}))?\s+(?=[^\W\d_])", chunk)
+        if dm:
+            found_date = found_date or _parse_date(*dm.groups())
+            chunk = chunk[dm.end():]
+        for name, nums in _split_groups(_tokenize(chunk), matcher):
+            name = name.strip(" :=-–|\t")
+            items.append(Item(raw=name, material_id=matcher.match(name), kg=nums[0],
+                              kg2=nums[1] if len(nums) > 1 else None))
     return found_date, items
+
+
+def parse_table(rows: list[list], matcher: Matcher) -> list[Item]:
+    """Рядки таблиці (Excel/CSV): перша текстова клітинка — назва, наступні числа — ваги."""
+    items: list[Item] = []
+    for row in rows:
+        name, nums = None, []
+        for cell in row:
+            if cell is None or (isinstance(cell, str) and not cell.strip()):
+                continue
+            if isinstance(cell, (int, float)) and not isinstance(cell, bool):
+                if name:
+                    nums.append(float(cell))
+                continue
+            s = str(cell).strip()
+            if _NUM_TOKEN.match(s):
+                if name:
+                    nums.append(_num(s))
+            elif name is None and re.search(r"[^\W\d_]", s):
+                name = s
+        if name and nums:
+            items.append(Item(raw=name, material_id=matcher.match(name), kg=nums[0],
+                              kg2=nums[1] if len(nums) > 1 else None))
+    return items
 
 
 # ── Фото через Claude ───────────────────────────────────────────────────────
@@ -167,8 +249,9 @@ async def parse_images(images: list[tuple[bytes, str]], materials: list[SurplusM
     names = [m.name for m in materials if m.is_active]
     content: list[dict] = []
     for data, media_type in images:
-        content.append({"type": "image", "source": {"type": "base64", "media_type": media_type,
-                                                    "data": base64.standard_b64encode(data).decode()}})
+        kind = "document" if media_type == "application/pdf" else "image"
+        content.append({"type": kind, "source": {"type": "base64", "media_type": media_type,
+                                                 "data": base64.standard_b64encode(data).decode()}})
     content.append({"type": "text", "text": _PROMPT.format(names=", ".join(names))})
 
     client = anthropic.AsyncAnthropic()

@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useQuasar } from 'quasar'
 import { useRouter } from 'vue-router'
 import { apiError, http, type Material, type Point, type RecognizeOut, type Submission } from '@/api'
 import { dateUa, todayIso } from '@/format'
 import { t } from '@/i18n'
 import { seg } from '@/theme'
-import { shrinkImage } from '@/image'
 import { linesPayload, mergeRecognized, type Column, type Row } from '@/lines'
 import LinesEditor from '@/components/LinesEditor.vue'
+import RecognizeInput from '@/components/RecognizeInput.vue'
 
 const $q = useQuasar()
 const router = useRouter()
@@ -22,18 +22,14 @@ const saving = ref(false)
 
 interface Slot {
   column: Column
-  mode: 'photo' | 'text'
-  text: string
-  previews: string[]
-  busy: boolean
   res: { filled: number; two: boolean; unknown: number } | null
 }
 const slots = reactive<Slot[]>([
-  { column: 'point', mode: 'photo', text: '', previews: [], busy: false, res: null },
-  { column: 'warehouse', mode: 'photo', text: '', previews: [], busy: false, res: null },
+  { column: 'point', res: null },
+  { column: 'warehouse', res: null },
 ])
 const active = ref(0)
-const fileInputs = ref<HTMLInputElement[]>([])
+const inputs = ref<(InstanceType<typeof RecognizeInput> | null)[]>([])
 
 const colLabel = (c: Column) => (c === 'point' ? t('rec.colReceiverLong') : t('rec.colWarehouseLong'))
 function setColumn(i: number, c: Column) {
@@ -69,9 +65,7 @@ onMounted(async () => {
   loadPending()
   const first = points.value.find((x) => x.is_active)
   if (first) onPoint(first.id)
-  window.addEventListener('paste', onPaste)
 })
-onBeforeUnmount(() => window.removeEventListener('paste', onPaste))
 
 const pointOptions = computed(() => points.value.filter((p) => p.is_active).map((p) => ({ label: p.name, value: p.id })))
 function onPoint(id: number) {
@@ -95,73 +89,14 @@ function applyResult(i: number, out: RecognizeOut) {
   if (filled && i === 0) active.value = 1
 }
 
-async function sendPhotos(i: number, files: File[]) {
-  const s = slots[i]
-  if (!files.length) return
-  s.busy = true
-  s.res = null
-  s.previews.forEach((u) => URL.revokeObjectURL(u))
-  s.previews = files.map((f) => URL.createObjectURL(f))
-  try {
-    const fd = new FormData()
-    for (const f of files.slice(0, 5)) fd.append('files', await shrinkImage(f), f.name || 'photo.jpg')
-    const out = (await http.post<RecognizeOut>('/recognize', fd)).data
-    applyResult(i, out)
-  } catch (e) {
-    s.res = null
-    $q.notify({ type: 'negative', message: apiError(e), timeout: 6000 })
-  } finally {
-    s.busy = false
-  }
-}
-
-async function sendText(i: number) {
-  const s = slots[i]
-  if (!s.text.trim()) return
-  s.busy = true
-  try {
-    const fd = new FormData()
-    fd.append('text', s.text)
-    applyResult(i, (await http.post<RecognizeOut>('/recognize', fd)).data)
-  } catch (e) {
-    $q.notify({ type: 'negative', message: apiError(e) })
-  } finally {
-    s.busy = false
-  }
-}
-
-function onFiles(i: number, ev: Event) {
-  const input = ev.target as HTMLInputElement
-  sendPhotos(i, Array.from(input.files ?? []))
-  input.value = ''
-}
-
-function onDrop(i: number, ev: DragEvent) {
-  active.value = i
-  sendPhotos(i, Array.from(ev.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/')))
-}
-
-// Скрін із буфера (Ctrl+V) — в активний слот. Текст у полі вставляється як звичайно.
-function onPaste(ev: ClipboardEvent) {
-  const imgs = Array.from(ev.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
-  if (!imgs.length) return
-  ev.preventDefault()
-  slots[active.value].mode = 'photo'
-  sendPhotos(active.value, imgs)
-}
-
 function reset() {
   pendingId.value = null
   setColumn(0, 'point')
   rows.value = []
   dateTouched.value = false
   form.value.ship_date = todayIso()
-  for (const s of slots) {
-    s.text = ''
-    s.res = null
-    s.previews.forEach((u) => URL.revokeObjectURL(u))
-    s.previews = []
-  }
+  for (const s of slots) s.res = null
+  inputs.value.forEach((x) => x?.reset())
   active.value = 0
 }
 
@@ -225,7 +160,7 @@ async function save() {
 
     <div class="slots q-mb-md">
       <div v-for="(s, i) in slots" :key="i" class="mg-card slot" :class="{ active: active === i }"
-        @click="active = i" @dragover.prevent @drop.prevent="onDrop(i, $event)">
+        @click="active = i" @dragenter="active = i">
         <div class="slot-h">
           <span class="step">{{ i + 1 }}</span>
           <span class="text-weight-medium">{{ t('rec.where') }}</span>
@@ -233,32 +168,8 @@ async function save() {
         <q-btn-toggle :model-value="s.column" spread no-caps unelevated toggle-color="primary" :color="seg.color" :text-color="seg.text"
           class="q-mb-sm" :options="[{ label: t('rec.colReceiver'), value: 'point' }, { label: t('rec.colWarehouse'), value: 'warehouse' }]"
           @update:model-value="(v: Column) => setColumn(i, v)" />
-        <q-tabs v-model="s.mode" dense no-caps align="left" active-color="primary" indicator-color="primary" class="q-mb-sm">
-          <q-tab name="photo" icon="photo_camera" :label="t('rec.photo')" />
-          <q-tab name="text" icon="notes" :label="t('rec.text')" />
-        </q-tabs>
-
-        <template v-if="s.mode === 'photo'">
-          <label class="drop" :class="{ busy: s.busy }">
-            <input :ref="(el) => (fileInputs[i] = el as HTMLInputElement)" type="file" accept="image/*" multiple hidden
-              @change="onFiles(i, $event)" />
-            <div v-if="s.previews.length" class="thumbs">
-              <img v-for="u in s.previews" :key="u" :src="u" alt="" />
-            </div>
-            <template v-else>
-              <q-icon name="add_a_photo" size="32px" color="primary" />
-              <div class="text-weight-medium">{{ t('rec.shoot') }}</div>
-              <div class="mg-sub gt-xs">{{ t('rec.dropHint') }}</div>
-            </template>
-            <q-inner-loading :showing="s.busy" :label="t('rec.busy')" label-class="text-primary" />
-          </label>
-        </template>
-        <template v-else>
-          <q-input v-model="s.text" type="textarea" outlined dense autogrow input-style="min-height: 120px"
-            :placeholder="'AL 71,9\nCu 37,85\nЛатунь 34,45\nБанка 12'" />
-          <q-btn unelevated no-caps color="primary" :label="t('rec.recognize')" class="q-mt-sm full-width" :loading="s.busy"
-            @click.stop="sendText(i)" />
-        </template>
+        <RecognizeInput :ref="(el) => (inputs[i] = el as InstanceType<typeof RecognizeInput> | null)" :materials="materials"
+          :active="active === i" @result="(o) => applyResult(i, o)" />
         <div v-if="s.res" class="result">
           <q-icon :name="s.res.filled ? 'check_circle' : 'error_outline'" :color="s.res.filled ? 'positive' : 'warning'"
             size="18px" /> {{ resultText(s.res) }}
@@ -292,10 +203,6 @@ async function save() {
 .slot.active { border-color: var(--mg-primary); box-shadow: 0 0 0 1px var(--mg-primary); }
 .slot-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .step { width: 22px; height: 22px; border-radius: 50%; background: var(--mg-primary); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
-.drop { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 150px; border: 2px dashed var(--mg-border-strong); border-radius: var(--mg-radius-md); cursor: pointer; text-align: center; padding: 12px; background: var(--mg-bg-2); }
-.drop:hover { border-color: var(--mg-primary); }
-.thumbs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-.thumbs img { height: 120px; max-width: 100%; object-fit: cover; border-radius: 6px; }
 .result { margin-top: 8px; font-size: 13px; }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 20px; color: var(--mg-fg-3); text-align: center; }
 .savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; background: var(--mg-bg); border-top: 1px solid var(--mg-border); }

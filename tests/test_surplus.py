@@ -241,3 +241,43 @@ async def test_custom_quotes(client):
         "quotes": "Хто всюди — той ніде. — Сенека\n\n«Без автора»"})
     assert (await client.get("/api/v1/auth/quotes")).json() == [
         {"text": "Хто всюди — той ніде.", "author": "Сенека"}, {"text": "Без автора", "author": ""}]
+
+
+def test_parse_one_line_and_mixed():
+    from app.modules.surplus.recognize import parse_text
+    m, names = _matcher()
+    got = lambda txt: [(names.get(i.material_id), i.kg, i.kg2) for i in parse_text(txt, m)[1]]
+    # усе в один рядок, без переносів
+    assert got("AL 71,9 Cu 37,85 Латунь 34,45 Банка 12") == [
+        ("Алюминий", 71.9, None), ("Медь микс", 37.85, None), ("Латунь/Бронза", 34.45, None), ("Банка", 12.0, None)]
+    # дві колонки в одному рядку + назва з числом
+    assert got("Медь 1 сорт 37,85 37,5 Банка 12 18") == [("Медь 1 сорт", 37.85, 37.5), ("Банка", 12.0, 18.0)]
+    # «АЛ 5 АЛ профиль 3» — дві різні позиції
+    assert got("АЛ 5 АЛ профиль 3") == [("Алюминий", 5.0, None), ("АЛ профиль", 3.0, None)]
+    # через кому/крапку з комою, з «кг» і двокрапкою, дата спереду
+    d, items = parse_text("03.07 ЦАМ: 1,4 кг; Титан 3,9, Н/Ж (10%) 1,8", m)
+    assert (d.day, d.month) == (3, 7)
+    assert [(names[i.material_id], i.kg) for i in items] == [("ЦАМ", 1.4), ("Титан", 3.9), ("Н/Ж (10%)", 1.8)]
+    assert got("АЛ электротех 71,9/65,7") == [("АЛ электротех", 71.9, 65.7)]
+
+
+async def test_recognize_files(client):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Матеріал", "Я", "ДМС"])
+    ws.append(["Алюминий", 71.9, 65.7])
+    ws.append(["Банка", "12", "18"])
+    buf = BytesIO()
+    wb.save(buf)
+    r = await client.post("/api/v1/surplus/recognize", files={"files": ("t.xlsx", buf.getvalue(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200, r.text
+    assert [(i["material_name"], i["kg"], i["kg2"]) for i in r.json()["items"]] == [
+        ("Алюминий", 71.9, 65.7), ("Банка", 12.0, 18.0)]
+    r = await client.post("/api/v1/surplus/recognize", files={"files": ("t.csv", "Банка;12\nЦАМ;1,4\n".encode("cp1251"), "text/csv")})
+    assert [(i["material_name"], i["kg"]) for i in r.json()["items"]] == [("Банка", 12.0), ("ЦАМ", 1.4)]
+    r = await client.post("/api/v1/surplus/recognize", files={"files": ("a.docx", b"x", "application/msword")})
+    assert r.status_code == 415

@@ -127,7 +127,7 @@ function remove(s: Submission) {
         <div class="mg-h small">{{ t('rcv.submitTitle') }}</div>
         <div class="mg-sub q-mb-md">{{ editingId ? t('rcv.editing', { date: dateUa(shipDate) }) : t('rcv.submitSub') }}</div>
         <q-input v-model="shipDate" type="date" dense outlined :label="t('common.date')" class="q-mb-md" />
-        <RecognizeInput @result="onResult" />
+        <RecognizeInput :materials="materials" @result="onResult" />
 
         <div v-if="rows.length" class="lines">
           <div v-for="(r, i) in rows" :key="i" class="line" :class="{ unk: !r.material_id }">

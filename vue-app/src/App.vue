@@ -121,7 +121,7 @@ async function logout() {
 @keyframes app-in { from { opacity: 0; } }
 
 .app-header {
-  background: color-mix(in srgb, var(--mg-bg-2) 78%, transparent);
+  background: color-mix(in srgb, var(--mg-bg-2) 92%, transparent);
   backdrop-filter: saturate(1.4) blur(16px); -webkit-backdrop-filter: saturate(1.4) blur(16px);
   color: var(--mg-fg); border-bottom: 1px solid var(--mg-border);
 }
