@@ -317,3 +317,20 @@ async def test_accuracy_trend(client):
     assert acc["count"] == 6 and acc["trend"] == "better"
     assert acc["recent_pct"] == 1.0 and acc["prev_pct"] == 10.0 and acc["abs_pct"] == 5.5
     assert acc["net_kg"] == -33.0 and acc["worst_material"] == "Алюминий"
+
+
+def test_api_key_cleanup(monkeypatch):
+    from app.modules.surplus.recognize import api_key, key_hint
+    k = "sk-ant-api03-" + "A" * 80 + "xyz9"
+    for dirty in [f"  {k}\n", f'"{k}"', f"Bearer {k}", f"ANTHROPIC_API_KEY={k}", f"{k}​"]:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", dirty)
+        assert api_key() == k, repr(dirty)
+    h = key_hint()
+    assert h["masked"] == "sk-ant-api03-A…xyz9" and h["looks_like_api_key"] and h["was_cleaned"]
+    assert k not in str(h)
+
+
+async def test_recognize_check_without_key(client, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    r = (await client.get("/api/v1/surplus/recognize/check")).json()
+    assert r["ok"] is False and r["error"] == "missing"

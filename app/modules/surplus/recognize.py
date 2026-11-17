@@ -267,8 +267,53 @@ _PROMPT = """Ти допомагаєш звіряти облік брухту к
 {names}"""
 
 
+def api_key() -> str:
+    """Ключ із оточення, очищений від того, що часто «прилипає» при копіюванні в панель хостингу:
+    пробіли й переноси, лапки, «Bearer », «ANTHROPIC_API_KEY=». Невидимі символи теж прибираємо."""
+    k = os.getenv("ANTHROPIC_API_KEY") or ""
+    k = "".join(ch for ch in k if ch.isprintable()).strip()
+    for prefix in ("ANTHROPIC_API_KEY=", "export ANTHROPIC_API_KEY=", "Bearer ", "bearer "):
+        if k.startswith(prefix):
+            k = k[len(prefix):].strip()
+    return k.strip().strip("\"'«»“”‘’`").strip()
+
+
+def key_hint() -> dict:
+    """Що стоїть на сервері — без розкриття ключа: початок, кінець, довжина, чи схоже на ключ API."""
+    raw = os.getenv("ANTHROPIC_API_KEY") or ""
+    k = api_key()
+    return {
+        "set": bool(k),
+        "masked": f"{k[:14]}…{k[-4:]}" if len(k) > 24 else ("…" if k else ""),
+        "length": len(k),
+        "looks_like_api_key": k.startswith("sk-ant-api"),
+        "looks_like_oauth": k.startswith("sk-ant-oat") or k.startswith("sk-ant-ort"),
+        "was_cleaned": raw != k,
+    }
+
+
+async def check_key() -> dict:
+    """Пробний мінімальний запит до Anthropic (список моделей, без витрат токенів)."""
+    import anthropic
+
+    info = key_hint()
+    if not info["set"]:
+        return {**info, "ok": False, "error": "missing"}
+    try:
+        await anthropic.AsyncAnthropic(api_key=api_key(), timeout=20, max_retries=0).models.list(limit=1)
+        return {**info, "ok": True, "error": None}
+    except anthropic.AuthenticationError:
+        return {**info, "ok": False, "error": "invalid"}
+    except anthropic.PermissionDeniedError:
+        return {**info, "ok": False, "error": "forbidden"}
+    except anthropic.APIConnectionError:
+        return {**info, "ok": False, "error": "network"}
+    except anthropic.APIStatusError as e:
+        return {**info, "ok": False, "error": f"http {e.status_code}"}
+
+
 async def ensure_photo_configured() -> None:
-    if not os.getenv("ANTHROPIC_API_KEY"):
+    if not api_key():
         raise HTTPException(503, L("Розпізнавання фото й PDF не налаштоване: на сервері не задано ANTHROPIC_API_KEY. "
                                    "Поки що — текстом, файлом Excel/CSV або зі списку.",
                                    "Распознавание фото и PDF не настроено: на сервере не задан ANTHROPIC_API_KEY. "
@@ -289,7 +334,7 @@ async def parse_images(images: list[tuple[bytes, str]], materials: list[SurplusM
                                                  "data": base64.standard_b64encode(data).decode()}})
     content.append({"type": "text", "text": _PROMPT.format(names=directory)})
 
-    client = anthropic.AsyncAnthropic(timeout=90, max_retries=2)
+    client = anthropic.AsyncAnthropic(api_key=api_key(), timeout=90, max_retries=2)
     try:
         resp = await client.beta.messages.create(
             model=MODEL,
@@ -303,9 +348,15 @@ async def parse_images(images: list[tuple[bytes, str]], materials: list[SurplusM
         raise HTTPException(429, L("Забагато запитів на розпізнавання — спробуйте за хвилину",
                                    "Слишком много запросов на распознавание — попробуйте через минуту")) from None
     except anthropic.AuthenticationError:
-        log.error("ANTHROPIC_API_KEY відхилено")
-        raise HTTPException(502, L("Ключ ANTHROPIC_API_KEY на сервері невірний або відкликаний.",
-                                   "Ключ ANTHROPIC_API_KEY на сервере неверный или отозван.")) from None
+        h = key_hint()
+        log.error("ANTHROPIC_API_KEY відхилено (%s, %s симв.)", h["masked"], h["length"])
+        raise HTTPException(502, L(
+            f"Anthropic не приймає ключ ANTHROPIC_API_KEY ({h['masked']}, {h['length']} симв.). "
+            "Створіть новий ключ у console.anthropic.com → API Keys і вставте в Render → Environment. "
+            "Перевірити: «Довідники → Розпізнавання фото».",
+            f"Anthropic не принимает ключ ANTHROPIC_API_KEY ({h['masked']}, {h['length']} симв.). "
+            "Создайте новый ключ в console.anthropic.com → API Keys и вставьте в Render → Environment. "
+            "Проверить: «Справочники → Распознавание фото».")) from None
     except anthropic.PermissionDeniedError as e:
         log.error("claude 403: %s", e.message)
         raise HTTPException(502, L("Ключ ANTHROPIC_API_KEY не має доступу або закінчився баланс в Anthropic Console.",

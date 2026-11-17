@@ -198,8 +198,13 @@ def _decode(data: bytes) -> str:
 @router.get("/recognize/status")
 async def recognize_status():
     """Чи налаштовано розпізнавання фото/PDF — щоб інтерфейс попередив заздалегідь, а не помилкою."""
-    import os
-    return {"photo": bool(os.getenv("ANTHROPIC_API_KEY"))}
+    return {"photo": bool(rec.api_key())}
+
+
+@router.get("/recognize/check")
+async def recognize_check():
+    """Діагностика ключа для «Довідників»: замаскований ключ і пробний запит до Anthropic."""
+    return await rec.check_key()
 
 
 @router.post("/recognize", response_model=s.RecognizeOut)

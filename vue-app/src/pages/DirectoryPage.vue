@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { t } from '@/i18n'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useQuasar } from 'quasar'
 import axios from 'axios'
 import { apiError, http, type Material, type Point } from '@/api'
@@ -14,6 +14,23 @@ const receiverMode = ref(false)
 const passwordOn = ref(true)
 const pins = ref<Record<number, string>>({})
 const quotes = ref('')
+
+// Діагностика ключа розпізнавання фото
+interface KeyCheck { set: boolean; ok: boolean; error: string | null; masked: string; length: number
+  looks_like_api_key: boolean; looks_like_oauth: boolean; was_cleaned: boolean }
+const keyCheck = ref<KeyCheck | null>(null)
+const checking = ref(false)
+async function checkKey() {
+  checking.value = true
+  try { keyCheck.value = (await http.get<KeyCheck>('/recognize/check')).data } finally { checking.value = false }
+}
+const keyMsg = computed(() => {
+  const k = keyCheck.value
+  if (!k) return ''
+  if (k.ok) return t('key.ok')
+  if (k.error === 'missing' || k.error === 'invalid' || k.error === 'forbidden' || k.error === 'network') return t(`key.${k.error}`)
+  return t('key.other', { e: k.error ?? '' })
+})
 
 async function load() {
   const [p, m, s, st] = await Promise.all([
@@ -50,7 +67,7 @@ async function savePin(p: Point, remove = false) {
     $q.notify({ type: 'negative', message: apiError(e) })
   }
 }
-onMounted(load)
+onMounted(() => { load(); checkKey() })
 
 async function savePoint(p: Partial<Point>) {
   try {
@@ -151,6 +168,25 @@ function addMat() {
           <q-btn unelevated no-caps color="primary" :label="t('common.save')" class="q-mt-sm" @click="saveQuotes" />
         </div>
       </div>
+      <div class="mg-card keycard">
+        <div class="card-h row items-center no-wrap">
+          <div class="col">
+            <div class="text-weight-medium">{{ t('key.title') }}</div>
+            <div class="mg-sub">{{ t('key.sub') }}</div>
+          </div>
+          <q-btn outline dense no-caps color="primary" icon="refresh" :label="t('key.check')" :loading="checking" @click="checkKey" />
+        </div>
+        <div v-if="keyCheck" class="q-pa-md">
+          <div class="kstate" :class="keyCheck.ok ? 'ok' : 'bad'">
+            <q-icon :name="keyCheck.ok ? 'check_circle' : 'error'" size="20px" />
+            <span>{{ keyMsg }}</span>
+          </div>
+          <div v-if="keyCheck.set" class="mg-sub q-mt-sm num">{{ t('key.onServer', { masked: keyCheck.masked, n: keyCheck.length }) }}</div>
+          <div v-if="keyCheck.set && keyCheck.looks_like_oauth" class="khint">{{ t('key.oauth') }}</div>
+          <div v-else-if="keyCheck.set && !keyCheck.looks_like_api_key" class="khint">{{ t('key.notApi') }}</div>
+          <div v-if="keyCheck.was_cleaned" class="khint">{{ t('key.cleaned') }}</div>
+        </div>
+      </div>
       </div>
 
       <div class="mg-card mats">
@@ -187,6 +223,10 @@ function addMat() {
 .page { max-width: 1080px; margin: 0 auto; padding: 24px 16px 32px; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 .left { display: flex; flex-direction: column; gap: 12px; }
+.kstate { display: flex; gap: 8px; align-items: flex-start; font-weight: 600; }
+.kstate.ok { color: var(--mg-positive); }
+.kstate.bad { color: var(--mg-negative); }
+.khint { margin-top: 8px; padding: 8px 10px; border-radius: var(--mg-radius-md); background: var(--mg-warning-soft); color: var(--mg-warning); font-size: 13px; }
 .pinline { padding: 8px 16px; flex-wrap: wrap; }
 .pin { width: 150px; }
 .ok { color: var(--mg-positive); }
