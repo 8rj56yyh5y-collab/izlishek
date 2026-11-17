@@ -1,4 +1,5 @@
 import type { RecognizedItem } from '@/api'
+import { t } from '@/i18n'
 
 export interface Row {
   material_id: number | null
@@ -44,10 +45,10 @@ export function mergeRecognized(rows: Row[], items: RecognizedItem[], column: Co
 
 export function linesPayload(rows: Row[]): { lines: object[]; error?: string } {
   const used = rows.filter((r) => r.point_kg !== '' || r.warehouse_kg !== '')
-  if (used.some((r) => !r.material_id)) return { lines: [], error: 'Оберіть матеріал у жовтих рядках' }
+  if (used.some((r) => !r.material_id)) return { lines: [], error: t('lines.errUnknown') }
   const ids = used.map((r) => r.material_id)
-  if (new Set(ids).size !== ids.length) return { lines: [], error: 'Матеріал повторюється в кількох рядках' }
-  if (!used.length) return { lines: [], error: 'Внесіть вагу хоча б по одному матеріалу' }
+  if (new Set(ids).size !== ids.length) return { lines: [], error: t('lines.errDup') }
+  if (!used.length) return { lines: [], error: t('lines.errEmpty') }
   return {
     lines: used.map((r) => ({
       material_id: r.material_id,

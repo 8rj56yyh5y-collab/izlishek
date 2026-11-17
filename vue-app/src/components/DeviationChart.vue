@@ -6,6 +6,8 @@ import { GridComponent, TooltipComponent } from 'echarts/components'
 import { SVGRenderer } from 'echarts/renderers'
 import type { TimelinePoint } from '@/api'
 import { dateUa, devKg, devMoney } from '@/format'
+import { t } from '@/i18n'
+import { theme } from '@/theme'
 
 echarts.use([BarChart, GridComponent, TooltipComponent, SVGRenderer])
 
@@ -26,7 +28,7 @@ function render() {
       formatter: (ps: { dataIndex: number }[]) => {
         const p = props.points[ps[0].dataIndex]
         return `<b>${dateUa(p.ship_date)}</b> · ${p.point_name}<br/>${p.receiver_name}<br/>` +
-          `${devKg(p.deviation_kg)} кг · <b>${devMoney(p.deviation_amount)}</b>`
+          `${devKg(p.deviation_kg)} ${t('common.kg')} · <b>${devMoney(p.deviation_amount)}</b>`
       },
     },
     xAxis: {
@@ -56,6 +58,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => { window.removeEventListener('resize', onResize); chart?.dispose() })
 watch(() => props.points, render, { deep: true })
+// Кольори беруться з CSS-токенів — після зміни теми перемальовуємо.
+watch(theme, () => requestAnimationFrame(render))
 </script>
 
 <template>

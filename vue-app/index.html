@@ -2,10 +2,15 @@
 <html lang="uk">
   <head>
     <meta charset="UTF-8" />
+    <meta name="theme-color" content="#1C1F24" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Надлишки приймальника</title>
+    <script>
+      // тема до першого кадру — без білого спалаху на темній темі
+      try { document.documentElement.dataset.theme = localStorage.getItem('bt_theme') || 'copper' } catch (e) { document.documentElement.dataset.theme = 'copper' }
+    </script>
+    <title>Брухтарня</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="app"></div>

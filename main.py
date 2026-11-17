@@ -10,8 +10,10 @@ from fastapi.staticfiles import StaticFiles
 from app.modules.surplus import models  # noqa: F401 — реєстрація таблиць
 from app.modules.surplus.router import router as surplus_router
 from app.modules.surplus.seed import seed
-from app.shared.auth import PasswordMiddleware
+from app.shared.auth import AuthMiddleware
+from app.shared.auth import router as auth_router
 from app.shared.config import get_settings
+from app.shared.i18n import LangMiddleware
 from app.shared.database import Base, get_engine, get_session
 
 SPA = Path(__file__).parent / "static" / "spa"
@@ -26,9 +28,11 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Надлишки приймальника", lifespan=lifespan, docs_url="/api/docs")
-if get_settings().app_password:
-    app.add_middleware(PasswordMiddleware, password=get_settings().app_password)
+app = FastAPI(title="Брухтарня", lifespan=lifespan, docs_url="/api/docs")
+# Порядок: мова виставляється першою (зовнішній шар), тож і 401 від входу — потрібною мовою.
+app.add_middleware(AuthMiddleware)
+app.add_middleware(LangMiddleware)
+app.include_router(auth_router)
 app.include_router(surplus_router)
 
 

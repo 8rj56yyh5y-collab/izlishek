@@ -1,6 +1,19 @@
 import axios from 'axios'
+import { ref } from 'vue'
+import { lang, t } from '@/i18n'
 
 export const http = axios.create({ baseURL: '/api/v1/surplus' })
+/** Сесія скінчилась (401) — App покаже екран входу. */
+export const authLost = ref(false)
+
+http.interceptors.request.use((cfg) => {
+  cfg.headers.set('X-Lang', lang.value)
+  return cfg
+})
+http.interceptors.response.use(undefined, (err) => {
+  if (err?.response?.status === 401) authLost.value = true
+  return Promise.reject(err)
+})
 
 export interface Point { id: number; name: string; receiver_name: string; is_active: boolean }
 export interface Material { id: number; name: string; group: string; price_per_kg: number; aliases: string | null; sort: number; is_active: boolean }
@@ -62,7 +75,7 @@ export function apiError(e: unknown): string {
   const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
   if (typeof d === 'string') return d
   if (Array.isArray(d)) return d.map((x: { msg?: string }) => x.msg ?? '').join('; ')
-  return 'Помилка запиту'
+  return t('common.error')
 }
 
 export interface RecognizedItem {

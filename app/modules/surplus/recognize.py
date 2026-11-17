@@ -21,6 +21,7 @@ from datetime import date
 from fastapi import HTTPException
 
 from app.modules.surplus.models import SurplusMaterial
+from app.shared.i18n import L
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,9 @@ MODEL = os.getenv("IZLISHEK_VISION_MODEL", "claude-opus-5-5")
 _LOOKALIKE = str.maketrans({"а": "a", "с": "c", "е": "e", "о": "o", "р": "p", "х": "x", "к": "k",
                             "і": "i", "у": "y", "т": "t", "м": "m", "н": "h", "в": "b", "ї": "i", "ё": "e"})
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
+_KG = re.compile(r"\b(?:кг|kg)\b\.?", re.IGNORECASE)
+# «назва [роздільник] вага [вага2]» — одна або дві ваги в кінці рядка
+_LINE = re.compile(r"^(.*?)[\s:=–\-|]*(\d+(?:[.,]\d+)?(?:[\s/|;–\-]+\d+(?:[.,]\d+)?)?)\s*$")
 _DATE_LINE = re.compile(r"^\s*(\d{1,2})[.,/](\d{1,2})(?:[.,/](\d{2,4}))?\s*$")
 
 
@@ -68,7 +72,7 @@ class Matcher:
         toks = set(_tokens(n))
         for alias, mid in self.entries:
             # Короткі аліаси («al», «cu») — лише цілим словом, інакше ловлять що завгодно.
-            if len(alias) <= 3:
+            if len(alias) <= 3 and alias.isalnum():
                 if alias in toks:
                     return mid
             elif alias in n:
@@ -101,11 +105,12 @@ def parse_text(text: str, matcher: Matcher) -> tuple[date | None, list[Item]]:
         if dm:
             found_date = found_date or _parse_date(*dm.groups())
             continue
-        first = _NUM.search(line)
-        if not first:
+        m = _LINE.match(_KG.sub(" ", line))
+        if not m:
             continue
-        name = line[: first.start()].strip(" :=-–|\t")
-        nums = [_num(x) for x in _NUM.findall(line[first.start():])]
+        name = m.group(1).strip(" :=-–|\t")
+        # Вага — числа В КІНЦІ рядка; числа всередині назви («Медь 1 сорт», «Н/Ж (10%)») — частина назви.
+        nums = [_num(x) for x in _NUM.findall(m.group(2))]
         if not name or not re.search(r"[^\W\d_]", name):
             continue
         items.append(Item(raw=name, material_id=matcher.match(name), kg=nums[0],
@@ -156,7 +161,7 @@ _PROMPT = """На фото — облік брухту кольорових ме
 
 async def parse_images(images: list[tuple[bytes, str]], materials: list[SurplusMaterial], matcher: Matcher) -> tuple[date | None, list[Item]]:
     if not os.getenv("ANTHROPIC_API_KEY"):
-        raise HTTPException(503, "Розпізнавання фото не налаштоване (немає ANTHROPIC_API_KEY). Вставте текстом.")
+        raise HTTPException(503, L("Розпізнавання фото не налаштоване (немає ANTHROPIC_API_KEY). Вставте текстом.", "Распознавание фото не настроено (нет ANTHROPIC_API_KEY). Вставьте текстом."))
     import anthropic  # лінивий імпорт: без ключа модуль не потрібен
 
     names = [m.name for m in materials if m.is_active]
@@ -177,20 +182,20 @@ async def parse_images(images: list[tuple[bytes, str]], materials: list[SurplusM
             messages=[{"role": "user", "content": content}],
         )
     except anthropic.RateLimitError:
-        raise HTTPException(429, "Забагато запитів на розпізнавання — спробуйте за хвилину") from None
+        raise HTTPException(429, L("Забагато запитів на розпізнавання — спробуйте за хвилину", "Слишком много запросов на распознавание — попробуйте через минуту")) from None
     except anthropic.APIStatusError as e:
         log.warning("claude error %s: %s", e.status_code, e.message)
-        raise HTTPException(502, "Сервіс розпізнавання повернув помилку. Спробуйте ще раз або вставте текстом.") from None
+        raise HTTPException(502, L("Сервіс розпізнавання повернув помилку. Спробуйте ще раз або вставте текстом.", "Сервис распознавания вернул ошибку. Попробуйте ещё раз или вставьте текстом.")) from None
     except anthropic.APIConnectionError:
-        raise HTTPException(502, "Немає зʼєднання із сервісом розпізнавання") from None
+        raise HTTPException(502, L("Немає зʼєднання із сервісом розпізнавання", "Нет соединения с сервисом распознавания")) from None
 
     if resp.stop_reason == "refusal":
-        raise HTTPException(422, "Не вдалося розпізнати це фото")
+        raise HTTPException(422, L("Не вдалося розпізнати це фото", "Не удалось распознать это фото"))
     text = next((b.text for b in resp.content if b.type == "text"), "")
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        raise HTTPException(422, "Не вдалося розпізнати фото — спробуйте чіткіше або вставте текстом") from None
+        raise HTTPException(422, L("Не вдалося розпізнати фото — спробуйте чіткіше або вставте текстом", "Не удалось распознать фото — попробуйте чётче или вставьте текстом")) from None
 
     by_name = {m.name: m.id for m in materials}
     items = [

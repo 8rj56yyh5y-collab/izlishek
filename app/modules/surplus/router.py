@@ -9,6 +9,7 @@ from app.modules.surplus import service
 from app.modules.surplus import recognize as rec
 from app.modules.surplus.export import build_xlsx
 from app.shared.database import SessionDep
+from app.shared.i18n import L
 
 router = APIRouter(prefix="/api/v1/surplus", tags=["surplus"])
 
@@ -121,7 +122,7 @@ async def export_xlsx(
     return Response(
         data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="izlishek.xlsx"'},
+        headers={"Content-Disposition": 'attachment; filename="brukhtarnia.xlsx"'},
     )
 
 
@@ -140,15 +141,15 @@ async def recognize(
     names = {m.id: m.name for m in materials}
     if files:
         if len(files) > 5:
-            raise HTTPException(422, "Не більше 5 фото за раз")
+            raise HTTPException(422, L("Не більше 5 фото за раз", "Не больше 5 фото за раз"))
         images = []
         for f in files:
             data = await f.read()
             if len(data) > _MAX_IMAGE:
-                raise HTTPException(413, "Фото завелике (макс. 8 МБ)")
+                raise HTTPException(413, L("Фото завелике (макс. 8 МБ)", "Фото слишком большое (макс. 8 МБ)"))
             mt = f.content_type or "image/jpeg"
             if mt not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
-                raise HTTPException(415, "Підтримуються JPEG, PNG, WebP")
+                raise HTTPException(415, L("Підтримуються JPEG, PNG, WebP", "Поддерживаются JPEG, PNG, WebP"))
             images.append((data, mt))
         found_date, items = await rec.parse_images(images, materials, matcher)
         source = "photo"
@@ -156,7 +157,7 @@ async def recognize(
         found_date, items = rec.parse_text(text, matcher)
         source = "text"
     else:
-        raise HTTPException(422, "Додайте фото або текст")
+        raise HTTPException(422, L("Додайте фото або текст", "Добавьте фото или текст"))
     return s.RecognizeOut(
         source=source,
         date=found_date,

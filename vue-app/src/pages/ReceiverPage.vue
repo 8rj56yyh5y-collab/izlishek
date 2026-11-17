@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '@/i18n'
 import { computed, onMounted, ref } from 'vue'
 import { useQuasar } from 'quasar'
 import { http, type LedgerRow, type ReceiverBalance, type Summary } from '@/api'
@@ -32,7 +33,7 @@ function open(r: LedgerRow) {
     shipOpen.value = true
     return
   }
-  $q.dialog({ title: 'Скасувати погашення?', message: `${r.material_name}: ${devKg(r.kg)} кг`, cancel: true, ok: { label: 'Скасувати погашення', color: 'negative' } })
+  $q.dialog({ title: t('st.cancelQ'), message: `${r.material_name}: ${devKg(r.kg)} ${t('common.kg')}`, cancel: { label: t('common.cancel'), flat: true }, ok: { label: t('common.delete'), color: 'negative' } })
     .onOk(async () => {
       await http.delete(`/settlements/${r.ref_id}`)
       load()
@@ -42,38 +43,38 @@ function open(r: LedgerRow) {
 
 <template>
   <q-page class="page">
-    <q-btn flat dense no-caps icon="arrow_back" label="Огляд" color="primary" to="/" class="q-mb-sm" />
+    <q-btn flat dense no-caps icon="arrow_back" :label="t('rc.back')" color="primary" to="/" class="q-mb-sm" />
     <div class="row items-center q-mb-md q-gutter-sm">
       <div>
         <h1 class="mg-h">{{ name }}</h1>
-        <div v-if="balance" class="mg-sub">{{ balance.shipments }} відвантажень</div>
+        <div v-if="balance" class="mg-sub">{{ balance.shipments }} {{ t('rc.shipments') }}</div>
       </div>
       <q-space />
-      <q-btn unelevated no-caps color="primary" icon="task_alt" label="Погашення" @click="settleOpen = true" />
+      <q-btn unelevated no-caps color="primary" icon="task_alt" :label="t('st.title')" @click="settleOpen = true" />
     </div>
 
     <div v-if="balance" class="mg-card q-pa-md q-mb-md">
       <div class="row items-end q-gutter-lg">
         <div>
-          <div class="mg-sub">Баланс</div>
+          <div class="mg-sub">{{ t('ov.balance') }}</div>
           <div class="num bal" :class="devClass(balance.balance_amount)">{{ devMoney(balance.balance_amount) }}</div>
-          <div class="mg-sub num">{{ devKg(balance.balance_kg) }} кг</div>
+          <div class="mg-sub num">{{ devKg(balance.balance_kg) }} {{ t('common.kg') }}</div>
         </div>
         <div v-if="owed.length" class="col">
-          <div class="mg-sub q-mb-xs">Має заготовити</div>
+          <div class="mg-sub q-mb-xs">{{ t('rc.owes') }}</div>
           <div class="chips">
-            <span v-for="m in owed" :key="m.material_id" class="chip num">{{ m.material_name }} · {{ devKg(-m.balance_kg).replace('+', '') }} кг</span>
+            <span v-for="m in owed" :key="m.material_id" class="chip num">{{ m.material_name }} · {{ devKg(-m.balance_kg).replace('+', '') }} {{ t('common.kg') }}</span>
           </div>
         </div>
-        <div v-else class="col mg-sub">Боргу по вазі немає</div>
+        <div v-else class="col mg-sub">{{ t('rc.noDebt') }}</div>
       </div>
     </div>
 
     <div class="mg-card">
-      <div v-if="!rows.length" class="empty">Відхилень немає</div>
+      <div v-if="!rows.length" class="empty">{{ t('rc.none') }}</div>
       <table v-else class="tbl">
         <thead>
-          <tr><th>Дата</th><th>Подія</th><th>Матеріал</th><th class="r">кг</th><th class="r gt-xs">₴</th><th class="r">Баланс, кг</th><th class="r gt-xs">Баланс, ₴</th></tr>
+          <tr><th>{{ t('common.date') }}</th><th>{{ t('rc.event') }}</th><th>{{ t('common.material') }}</th><th class="r">{{ t('common.kg') }}</th><th class="r gt-xs">₴</th><th class="r">{{ t('rc.balKg') }}</th><th class="r gt-xs">{{ t('rc.balUah') }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="(r, i) in rows" :key="i" class="clk" @click="open(r)">

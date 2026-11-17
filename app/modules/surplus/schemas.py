@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from app.shared.i18n import L
 
 
 class _Orm(BaseModel):
@@ -65,7 +66,7 @@ class ShipmentIn(BaseModel):
     def _unique_materials(cls, v: list[LineIn]) -> list[LineIn]:
         ids = [ln.material_id for ln in v]
         if len(ids) != len(set(ids)):
-            raise ValueError("Один матеріал не може бути у відвантаженні двічі")
+            raise ValueError(L("Один матеріал не може бути у відвантаженні двічі", "Один материал не может быть в отгрузке дважды"))
         return v
 
 
@@ -128,7 +129,7 @@ class SettlementIn(BaseModel):
     @classmethod
     def _nonzero(cls, v: Decimal) -> Decimal:
         if v == 0:
-            raise ValueError("Вага погашення не може бути нульовою")
+            raise ValueError(L("Вага погашення не може бути нульовою", "Вес погашения не может быть нулевым"))
         return v
 
 

@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuasar } from 'quasar'
 import { apiError, http, type Material, type Point, type Shipment } from '@/api'
 import { todayIso } from '@/format'
+import { t } from '@/i18n'
 import LinesEditor from './LinesEditor.vue'
 import { linesPayload, type Row } from '@/lines'
 
@@ -53,14 +54,14 @@ watch(open, (v) => v && load())
 
 async function save() {
   const res = linesPayload(rows.value)
-  if (!form.value.point_id) return $q.notify({ type: 'warning', message: 'Оберіть пункт' })
+  if (!form.value.point_id) return $q.notify({ type: 'warning', message: t('lines.errPoint') })
   if (res.error) return $q.notify({ type: 'warning', message: res.error })
   saving.value = true
   try {
     const body = { ...form.value, note: form.value.note || null, lines: res.lines }
     if (props.shipmentId) await http.put(`/shipments/${props.shipmentId}`, body)
     else await http.post('/shipments', body)
-    $q.notify({ type: 'positive', message: 'Відвантаження збережено' })
+    $q.notify({ type: 'positive', message: t('sh.saved') })
     open.value = false
     emit('saved')
   } catch (e) {
@@ -71,7 +72,7 @@ async function save() {
 }
 
 function remove() {
-  $q.dialog({ title: 'Видалити відвантаження?', message: 'Відхилення зникнуть з балансу приймальника.', cancel: true, ok: { label: 'Видалити', color: 'negative' } })
+  $q.dialog({ title: t('sh.deleteQ'), message: t('sh.deleteMsg'), cancel: { label: t('common.cancel'), flat: true }, ok: { label: t('common.delete'), color: 'negative' } })
     .onOk(async () => {
       await http.delete(`/shipments/${props.shipmentId}`)
       open.value = false
@@ -84,7 +85,7 @@ function remove() {
   <q-dialog v-model="open" :maximized="$q.screen.lt.sm" persistent>
     <q-card class="dlg">
       <q-card-section class="row items-center q-pb-sm">
-        <div class="mg-h">{{ shipmentId ? 'Відвантаження' : 'Нове відвантаження' }}</div>
+        <div class="mg-h">{{ shipmentId ? t('sh.title') : t('sh.newTitle') }}</div>
         <q-space />
         <q-btn flat round dense icon="close" @click="open = false" />
       </q-card-section>
@@ -93,11 +94,11 @@ function remove() {
 
       <q-card-section class="q-pt-none">
         <div class="head">
-          <q-input v-model="form.ship_date" type="date" dense outlined label="Дата" />
-          <q-select :model-value="form.point_id" :options="pointOptions" emit-value map-options dense outlined label="Пункт"
+          <q-input v-model="form.ship_date" type="date" dense outlined :label="t('common.date')" />
+          <q-select :model-value="form.point_id" :options="pointOptions" emit-value map-options dense outlined :label="t('common.point')"
             @update:model-value="onPoint" />
-          <q-input v-model="form.receiver_name" dense outlined label="Приймальник" />
-          <q-input v-model="form.destination" dense outlined label="Склад-отримувач" />
+          <q-input v-model="form.receiver_name" dense outlined :label="t('common.receiver')" />
+          <q-input v-model="form.destination" dense outlined :label="t('sh.dest')" />
         </div>
       </q-card-section>
 
@@ -106,14 +107,14 @@ function remove() {
       </q-card-section>
 
       <q-card-section class="q-pt-none">
-        <q-input v-model="form.note" dense outlined autogrow label="Примітка" />
+        <q-input v-model="form.note" dense outlined autogrow :label="t('common.note')" />
       </q-card-section>
 
       <q-card-actions align="right" class="q-pa-md">
-        <q-btn v-if="shipmentId" flat no-caps color="negative" icon="delete" label="Видалити" @click="remove" />
+        <q-btn v-if="shipmentId" flat no-caps color="negative" icon="delete" :label="t('common.delete')" @click="remove" />
         <q-space />
-        <q-btn flat no-caps label="Скасувати" @click="open = false" />
-        <q-btn unelevated no-caps color="primary" label="Зберегти" :loading="saving" @click="save" />
+        <q-btn flat no-caps :label="t('common.cancel')" @click="open = false" />
+        <q-btn unelevated no-caps color="primary" :label="t('common.save')" :loading="saving" @click="save" />
       </q-card-actions>
     </q-card>
   </q-dialog>

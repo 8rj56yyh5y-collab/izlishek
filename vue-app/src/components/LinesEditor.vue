@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { Material } from '@/api'
 import { devClass, devKg, devMoney, devPct } from '@/format'
 import { num, type Row } from '@/lines'
+import { t } from '@/i18n'
 
 const rows = defineModel<Row[]>({ required: true })
 const props = defineProps<{ materials: Material[] }>()
@@ -34,6 +35,11 @@ const totals = computed(() => {
   return { point: r3(point), wh: r3(wh), dev: r3(dev), amount, surplus: r3(surplus), shortage: r3(shortage) }
 })
 
+// Матеріали з вагою, але без ціни: гроші по них = 0, про це треба сказати прямо.
+const noPrice = computed(() => rows.value
+  .filter((r) => r.material_id && calc(r) && !priceOf(r))
+  .map((r) => matById.value.get(r.material_id!)?.name ?? ''))
+
 const usedIds = computed(() => new Set(rows.value.map((r) => r.material_id)))
 const materialOptions = (current: number | null) =>
   props.materials
@@ -57,10 +63,10 @@ function fillAll() {
 <template>
   <div>
     <div class="grid grid-head">
-      <div>Матеріал</div>
-      <div class="r">Приймальник, кг</div>
-      <div class="r">Склад, кг</div>
-      <div class="r">Відхилення</div>
+      <div>{{ t('common.material') }}</div>
+      <div class="r">{{ t('lines.receiverKg') }}</div>
+      <div class="r">{{ t('lines.warehouseKg') }}</div>
+      <div class="r">{{ t('lines.deviation') }}</div>
       <div class="r gt-xs">₴</div>
       <div />
     </div>
@@ -68,12 +74,12 @@ function fillAll() {
       <div class="mat">
         <q-select
           v-model="r.material_id" :options="materialOptions(r.material_id)" emit-value map-options dense borderless
-          :placeholder="r.raw ? 'Оберіть матеріал' : 'Матеріал'"
+          :placeholder="r.raw ? t('lines.pickMaterial') : t('common.material')"
         />
-        <div v-if="!r.material_id && r.raw" class="raw">на фото/в тексті: «{{ r.raw }}»</div>
+        <div v-if="!r.material_id && r.raw" class="raw">{{ t('lines.seenAs', { raw: r.raw }) }}</div>
       </div>
-      <q-input v-model="r.point_kg" dense outlined inputmode="decimal" input-class="text-right num" bg-color="white" />
-      <q-input v-model="r.warehouse_kg" dense outlined inputmode="decimal" input-class="text-right num" bg-color="white" />
+      <q-input v-model="r.point_kg" dense outlined inputmode="decimal" input-class="text-right num" />
+      <q-input v-model="r.warehouse_kg" dense outlined inputmode="decimal" input-class="text-right num" />
       <div class="r num">
         <template v-if="calc(r)">
           <span :class="devClass(calc(r)!.dev)">{{ devKg(calc(r)!.dev) }}</span>
@@ -87,26 +93,30 @@ function fillAll() {
       <q-btn flat round dense size="sm" icon="close" color="grey-6" @click="rows.splice(i, 1)" />
     </div>
     <div class="row q-gutter-sm q-mt-sm">
-      <q-btn flat no-caps dense icon="add" label="Рядок" color="primary"
+      <q-btn flat no-caps dense icon="add" :label="t('lines.addRow')" color="primary"
         @click="rows.push({ material_id: null, point_kg: '', warehouse_kg: '', price_per_kg: null })" />
-      <q-btn flat no-caps dense icon="playlist_add" label="Усі матеріали" color="primary" @click="fillAll" />
+      <q-btn flat no-caps dense icon="playlist_add" :label="t('lines.allMaterials')" color="primary" @click="fillAll" />
     </div>
 
     <div class="legend mg-sub q-mt-sm">
-      <span><i class="sw sw-pos" /> плюс приймальника (склад прийняв більше)</span>
-      <span><i class="sw sw-neg" /> мінус — недостача, має заготовити</span>
+      <span><i class="sw sw-pos" /> {{ t('lines.legendPlus') }}</span>
+      <span><i class="sw sw-neg" /> {{ t('lines.legendMinus') }}</span>
+      <span><i class="sw sw-unk" /> {{ t('lines.legendUnknown') }}</span>
     </div>
 
     <div class="totals q-mt-md">
-      <div><div class="mg-sub">Приймальник</div><div class="num big">{{ devKg(totals.point).replace('+', '') }} кг</div></div>
-      <div><div class="mg-sub">Склад</div><div class="num big">{{ devKg(totals.wh).replace('+', '') }} кг</div></div>
-      <div><div class="mg-sub">Плюс</div><div class="num big dev-pos">{{ devKg(totals.surplus) }} кг</div></div>
-      <div><div class="mg-sub">Мінус</div><div class="num big dev-neg">{{ devKg(totals.shortage) }} кг</div></div>
+      <div><div class="mg-sub">{{ t('common.receiver') }}</div><div class="num big">{{ devKg(totals.point).replace('+', '') }} {{ t('common.kg') }}</div></div>
+      <div><div class="mg-sub">{{ t('common.warehouse') }}</div><div class="num big">{{ devKg(totals.wh).replace('+', '') }} {{ t('common.kg') }}</div></div>
+      <div><div class="mg-sub">{{ t('lines.plus') }}</div><div class="num big dev-pos">{{ devKg(totals.surplus) }} {{ t('common.kg') }}</div></div>
+      <div><div class="mg-sub">{{ t('lines.minus') }}</div><div class="num big dev-neg">{{ devKg(totals.shortage) }} {{ t('common.kg') }}</div></div>
       <div>
-        <div class="mg-sub">Разом для приймальника</div>
+        <div class="mg-sub">{{ t('lines.total') }}</div>
         <div class="num big" :class="devClass(totals.amount)">{{ devMoney(totals.amount) }}</div>
-        <div class="mg-sub num">{{ devKg(totals.dev) }} кг</div>
+        <div class="mg-sub num">{{ devKg(totals.dev) }} {{ t('common.kg') }}</div>
       </div>
+    </div>
+    <div v-if="noPrice.length" class="noprice mg-sub">
+      <q-icon name="info" size="16px" /> {{ t('lines.noPrice', { names: noPrice.join(', ') }) }}
     </div>
   </div>
 </template>
@@ -126,6 +136,8 @@ function fillAll() {
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
 .sw-pos { background: var(--mg-positive); }
 .sw-neg { background: var(--mg-negative); }
+.sw-unk { background: var(--mg-warning); }
+.noprice { margin-top: 8px; color: var(--mg-warning); }
 .totals { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; background: var(--mg-bg-2); padding: 12px 16px; border-radius: var(--mg-radius-md); }
 .big { font-size: 17px; font-weight: 600; }
 @media (max-width: 600px) {

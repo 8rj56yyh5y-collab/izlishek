@@ -4,6 +4,8 @@ import { useQuasar } from 'quasar'
 import { useRouter } from 'vue-router'
 import { apiError, http, type Material, type Point, type RecognizeOut } from '@/api'
 import { todayIso } from '@/format'
+import { t } from '@/i18n'
+import { seg } from '@/theme'
 import { shrinkImage } from '@/image'
 import { linesPayload, mergeRecognized, type Column, type Row } from '@/lines'
 import LinesEditor from '@/components/LinesEditor.vue'
@@ -24,16 +26,16 @@ interface Slot {
   text: string
   previews: string[]
   busy: boolean
-  result: string
+  res: { filled: number; two: boolean; unknown: number } | null
 }
 const slots = reactive<Slot[]>([
-  { column: 'point', mode: 'photo', text: '', previews: [], busy: false, result: '' },
-  { column: 'warehouse', mode: 'photo', text: '', previews: [], busy: false, result: '' },
+  { column: 'point', mode: 'photo', text: '', previews: [], busy: false, res: null },
+  { column: 'warehouse', mode: 'photo', text: '', previews: [], busy: false, res: null },
 ])
 const active = ref(0)
 const fileInputs = ref<HTMLInputElement[]>([])
 
-const colLabel = (c: Column) => (c === 'point' ? 'Приймальник («Я»)' : 'Склад (що прийняв)')
+const colLabel = (c: Column) => (c === 'point' ? t('rec.colReceiverLong') : t('rec.colWarehouseLong'))
 function setColumn(i: number, c: Column) {
   slots[i].column = c
   slots[1 - i].column = c === 'point' ? 'warehouse' : 'point'
@@ -55,16 +57,19 @@ function onPoint(id: number) {
   form.value.receiver_name = points.value.find((p) => p.id === id)?.receiver_name ?? ''
 }
 
+// Текст рахуємо в шаблоні, а не зберігаємо — щоб він перекладався при зміні мови.
+function resultText(r: { filled: number; two: boolean; unknown: number }) {
+  if (!r.filled) return t('rec.nothing')
+  return t('rec.found', { n: r.filled }) + (r.two ? ' · ' + t('rec.twoCols') : '') +
+    (r.unknown ? ' · ' + t('rec.unknown', { n: r.unknown }) : '')
+}
+
 function applyResult(i: number, out: RecognizeOut) {
   const s = slots[i]
   const { filled, unknown } = mergeRecognized(rows.value, out.items, s.column)
   if (out.date && !dateTouched.value) form.value.ship_date = out.date
   const two = out.items.some((it) => it.kg2 !== null)
-  s.result = filled
-    ? `Розпізнано ${filled} ${filled === 1 ? 'рядок' : filled < 5 ? 'рядки' : 'рядків'}` +
-      (two ? ' · знайдено дві колонки — заповнено обидві' : '') +
-      (unknown ? ` · ${unknown} без матеріалу (жовті)` : '')
-    : 'Нічого не знайдено — спробуйте інше фото або текст'
+  s.res = { filled, two, unknown }
   if (filled && i === 0) active.value = 1
 }
 
@@ -72,7 +77,7 @@ async function sendPhotos(i: number, files: File[]) {
   const s = slots[i]
   if (!files.length) return
   s.busy = true
-  s.result = ''
+  s.res = null
   s.previews.forEach((u) => URL.revokeObjectURL(u))
   s.previews = files.map((f) => URL.createObjectURL(f))
   try {
@@ -81,7 +86,7 @@ async function sendPhotos(i: number, files: File[]) {
     const out = (await http.post<RecognizeOut>('/recognize', fd)).data
     applyResult(i, out)
   } catch (e) {
-    s.result = ''
+    s.res = null
     $q.notify({ type: 'negative', message: apiError(e), timeout: 6000 })
   } finally {
     s.busy = false
@@ -129,7 +134,7 @@ function reset() {
   form.value.ship_date = todayIso()
   for (const s of slots) {
     s.text = ''
-    s.result = ''
+    s.res = null
     s.previews.forEach((u) => URL.revokeObjectURL(u))
     s.previews = []
   }
@@ -138,14 +143,14 @@ function reset() {
 
 async function save() {
   const res = linesPayload(rows.value)
-  if (!form.value.point_id) return $q.notify({ type: 'warning', message: 'Оберіть пункт' })
+  if (!form.value.point_id) return $q.notify({ type: 'warning', message: t('lines.errPoint') })
   if (res.error) return $q.notify({ type: 'warning', message: res.error })
   saving.value = true
   try {
     await http.post('/shipments', { ...form.value, lines: res.lines })
     $q.notify({
-      type: 'positive', message: 'Звірку збережено',
-      actions: [{ label: 'До огляду', color: 'white', handler: () => router.push('/') }],
+      type: 'positive', message: t('rec.savedOk'),
+      actions: [{ label: t('rec.toOverview'), color: 'white', handler: () => router.push('/') }],
     })
     reset()
   } catch (e) {
@@ -159,16 +164,16 @@ async function save() {
 <template>
   <q-page class="page">
     <div class="q-mb-md">
-      <h1 class="mg-h">Звірка відвантаження</h1>
-      <div class="mg-sub">Додайте два фото або тексти — що здав приймальник і що прийняв склад. Відхилення порахуються самі.</div>
+      <h1 class="mg-h">{{ t('rec.title') }}</h1>
+      <div class="mg-sub">{{ t('rec.sub') }}</div>
     </div>
 
     <div class="mg-card q-pa-md q-mb-md head">
-      <q-input v-model="form.ship_date" type="date" dense outlined label="Дата" @update:model-value="dateTouched = true" />
-      <q-select :model-value="form.point_id" :options="pointOptions" emit-value map-options dense outlined label="Пункт"
+      <q-input v-model="form.ship_date" type="date" dense outlined :label="t('common.date')" @update:model-value="dateTouched = true" />
+      <q-select :model-value="form.point_id" :options="pointOptions" emit-value map-options dense outlined :label="t('common.point')"
         @update:model-value="onPoint" />
-      <q-input v-model="form.receiver_name" dense outlined label="Приймальник" />
-      <q-input v-model="form.destination" dense outlined label="Склад" />
+      <q-input v-model="form.receiver_name" dense outlined :label="t('common.receiver')" />
+      <q-input v-model="form.destination" dense outlined :label="t('common.warehouse')" />
     </div>
 
     <div class="slots q-mb-md">
@@ -176,14 +181,14 @@ async function save() {
         @click="active = i" @dragover.prevent @drop.prevent="onDrop(i, $event)">
         <div class="slot-h">
           <span class="step">{{ i + 1 }}</span>
-          <span class="text-weight-medium">Куди ставимо?</span>
+          <span class="text-weight-medium">{{ t('rec.where') }}</span>
         </div>
-        <q-btn-toggle :model-value="s.column" spread no-caps unelevated toggle-color="primary" color="grey-2" text-color="grey-9"
-          class="q-mb-sm" :options="[{ label: 'Приймальник', value: 'point' }, { label: 'Склад', value: 'warehouse' }]"
+        <q-btn-toggle :model-value="s.column" spread no-caps unelevated toggle-color="primary" :color="seg.color" :text-color="seg.text"
+          class="q-mb-sm" :options="[{ label: t('rec.colReceiver'), value: 'point' }, { label: t('rec.colWarehouse'), value: 'warehouse' }]"
           @update:model-value="(v: Column) => setColumn(i, v)" />
         <q-tabs v-model="s.mode" dense no-caps align="left" active-color="primary" indicator-color="primary" class="q-mb-sm">
-          <q-tab name="photo" icon="photo_camera" label="Фото / скрін" />
-          <q-tab name="text" icon="notes" label="Текст" />
+          <q-tab name="photo" icon="photo_camera" :label="t('rec.photo')" />
+          <q-tab name="text" icon="notes" :label="t('rec.text')" />
         </q-tabs>
 
         <template v-if="s.mode === 'photo'">
@@ -195,20 +200,21 @@ async function save() {
             </div>
             <template v-else>
               <q-icon name="add_a_photo" size="32px" color="primary" />
-              <div class="text-weight-medium">Сфотографувати або вибрати</div>
-              <div class="mg-sub gt-xs">або перетягніть сюди / Ctrl+V скрін</div>
+              <div class="text-weight-medium">{{ t('rec.shoot') }}</div>
+              <div class="mg-sub gt-xs">{{ t('rec.dropHint') }}</div>
             </template>
-            <q-inner-loading :showing="s.busy" label="Розпізнаю…" label-class="text-primary" />
+            <q-inner-loading :showing="s.busy" :label="t('rec.busy')" label-class="text-primary" />
           </label>
         </template>
         <template v-else>
           <q-input v-model="s.text" type="textarea" outlined dense autogrow input-style="min-height: 120px"
-            :placeholder="'AL 71,9\nCu 37,85\nЛатунь 34,45\nAL банка 12'" />
-          <q-btn unelevated no-caps color="primary" label="Розпізнати" class="q-mt-sm full-width" :loading="s.busy"
+            :placeholder="'AL 71,9\nCu 37,85\nЛатунь 34,45\nБанка 12'" />
+          <q-btn unelevated no-caps color="primary" :label="t('rec.recognize')" class="q-mt-sm full-width" :loading="s.busy"
             @click.stop="sendText(i)" />
         </template>
-        <div v-if="s.result" class="result">
-          <q-icon name="check_circle" color="positive" size="18px" /> {{ s.result }}
+        <div v-if="s.res" class="result">
+          <q-icon :name="s.res.filled ? 'check_circle' : 'error_outline'" :color="s.res.filled ? 'positive' : 'warning'"
+            size="18px" /> {{ resultText(s.res) }}
           <span class="mg-muted"> → {{ colLabel(s.column) }}</span>
         </div>
       </div>
@@ -217,16 +223,16 @@ async function save() {
     <div class="mg-card q-pa-md">
       <div v-if="!rows.length" class="empty">
         <q-icon name="table_rows" size="28px" color="grey-5" />
-        <div>Тут зʼявиться таблиця після розпізнавання.</div>
-        <q-btn flat no-caps color="primary" label="Або заповнити вручну"
+        <div>{{ t('rec.tableHint') }}</div>
+        <q-btn flat no-caps color="primary" :label="t('rec.manual')"
           @click="rows = materials.filter((m) => m.is_active).map((m) => ({ material_id: m.id, point_kg: '', warehouse_kg: '', price_per_kg: null }))" />
       </div>
       <LinesEditor v-else v-model="rows" :materials="materials" />
     </div>
 
     <div v-if="rows.length" class="savebar">
-      <q-btn flat no-caps label="Очистити" @click="reset" />
-      <q-btn unelevated no-caps color="primary" icon="save" label="Зберегти звірку" :loading="saving" @click="save" />
+      <q-btn flat no-caps :label="t('rec.clear')" @click="reset" />
+      <q-btn unelevated no-caps color="primary" icon="save" :label="t('rec.save')" :loading="saving" @click="save" />
     </div>
   </q-page>
 </template>

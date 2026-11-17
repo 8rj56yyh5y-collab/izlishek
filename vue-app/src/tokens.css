@@ -1,29 +1,66 @@
-/* Токени взяті з Gobsek (vue-app/src/css/tokens.css), щоб модуль виглядав «своїм». */
-:root {
-  --mg-primary: #3651E6;
-  --mg-primary-soft: rgba(54, 81, 230, 0.10);
-  --mg-positive: #16A34A;
-  --mg-positive-soft: rgba(22, 163, 74, 0.10);
+/* Токени у стилі Gobsek (--mg-*), три теми: copper (типова, темна), steel, khaki.
+   Тема ставиться атрибутом html[data-theme], див. theme.ts. */
+:root, :root[data-theme="steel"] {
+  --mg-primary: #2F5D8A;
+  --mg-primary-soft: rgba(47, 93, 138, 0.12);
+  --mg-positive: #15803D;
+  --mg-positive-soft: rgba(21, 128, 61, 0.10);
   --mg-negative: #DC2626;
   --mg-negative-soft: rgba(220, 38, 38, 0.10);
   --mg-warning: #B45309;
-  --mg-warning-soft: rgba(232, 150, 19, 0.15);
-  --mg-bg: #ffffff;
-  --mg-bg-2: #F6F7F9;
-  --mg-fg: rgba(0, 0, 0, 0.87);
-  --mg-fg-2: rgba(0, 0, 0, 0.68);
-  --mg-fg-3: rgba(0, 0, 0, 0.58);
-  --mg-border: rgba(0, 0, 0, 0.08);
-  --mg-border-strong: rgba(0, 0, 0, 0.18);
-  --mg-radius-md: 8px;
-  --mg-radius-lg: 12px;
+  --mg-warning-soft: rgba(232, 150, 19, 0.16);
+  --mg-bg: #FFFFFF;
+  --mg-bg-2: #EEF1F4;
+  --mg-fg: rgba(13, 22, 32, 0.90);
+  --mg-fg-2: rgba(13, 22, 32, 0.70);
+  --mg-fg-3: rgba(13, 22, 32, 0.56);
+  --mg-border: rgba(13, 22, 32, 0.09);
+  --mg-border-strong: rgba(13, 22, 32, 0.20);
 }
+:root[data-theme="khaki"] {
+  --mg-primary: #56652B;
+  --mg-primary-soft: rgba(86, 101, 43, 0.12);
+  --mg-positive: #1F8A5B;
+  --mg-positive-soft: rgba(31, 138, 91, 0.12);
+  --mg-negative: #C62828;
+  --mg-negative-soft: rgba(198, 40, 40, 0.10);
+  --mg-warning: #A15C07;
+  --mg-warning-soft: rgba(214, 140, 20, 0.18);
+  --mg-bg: #FBFBF6;
+  --mg-bg-2: #EAECDF;
+  --mg-fg: rgba(28, 33, 20, 0.92);
+  --mg-fg-2: rgba(28, 33, 20, 0.72);
+  --mg-fg-3: rgba(28, 33, 20, 0.58);
+  --mg-border: rgba(28, 33, 20, 0.10);
+  --mg-border-strong: rgba(28, 33, 20, 0.22);
+}
+:root[data-theme="copper"] {
+  --mg-primary: #D9822B;
+  --mg-primary-soft: rgba(217, 130, 43, 0.16);
+  --mg-positive: #3FB37F;
+  --mg-positive-soft: rgba(63, 179, 127, 0.14);
+  --mg-negative: #F05D5E;
+  --mg-negative-soft: rgba(240, 93, 94, 0.14);
+  --mg-warning: #E8B04A;
+  --mg-warning-soft: rgba(232, 176, 74, 0.16);
+  --mg-bg: #1C1F24;
+  --mg-bg-2: #131518;
+  --mg-fg: #ECE7E1;
+  --mg-fg-2: #B9B1A8;
+  --mg-fg-3: #8F877E;
+  --mg-border: rgba(255, 255, 255, 0.08);
+  --mg-border-strong: rgba(255, 255, 255, 0.18);
+}
+:root { --mg-radius-md: 8px; --mg-radius-lg: 12px; }
+
 html, body, #app {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   color: var(--mg-fg);
   background: var(--mg-bg-2);
 }
+body.body--dark { background: var(--mg-bg-2); }
+.body--dark .q-card, .body--dark .q-menu { background: var(--mg-bg); }
 .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dev-pos { color: var(--mg-positive); font-weight: 600; }
 .dev-neg { color: var(--mg-negative); font-weight: 600; }
@@ -36,4 +73,4 @@ html, body, #app {
 .mg-muted { color: var(--mg-fg-3); }
 .mg-h { font-size: 20px; line-height: 28px; font-weight: 600; margin: 0; letter-spacing: 0; }
 .mg-sub { font-size: 13px; color: var(--mg-fg-3); }
-.q-table th { font-weight: 600; color: var(--mg-fg-2); }
+.mg-accent { color: var(--mg-primary); }

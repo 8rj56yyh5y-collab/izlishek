@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '@/i18n'
 import { onMounted, ref, watch } from 'vue'
 import { cleanParams, http, type Period, type ShipmentListItem } from '@/api'
 import { dateUa, devClass, devKg, devMoney, kg } from '@/format'
@@ -31,29 +32,29 @@ function edit(id: number | null) {
 <template>
   <q-page class="page">
     <div class="row items-center q-mb-md">
-      <h1 class="mg-h">Відвантаження</h1>
+      <h1 class="mg-h">{{ t('sh.title') }}</h1>
       <q-space />
-      <q-btn unelevated no-caps color="primary" icon="add" label="Нове" @click="edit(null)" />
+      <q-btn unelevated no-caps color="primary" icon="add" :label="t('sh.new')" @click="edit(null)" />
     </div>
     <PeriodFilter v-model="period" class="q-mb-md" />
 
     <div class="mg-card">
-      <div v-if="!items.length && !loading" class="empty">Відвантажень за період немає</div>
+      <div v-if="!items.length && !loading" class="empty">{{ t('sh.none') }}</div>
       <div v-for="s in items" :key="s.id" class="item" @click="edit(s.id)">
         <div class="date num">{{ dateUa(s.ship_date) }}</div>
         <div class="who">
           <div class="text-weight-medium">{{ s.receiver_name }}</div>
-          <div class="mg-sub">{{ s.point_name }} → {{ s.destination }} · {{ s.lines_count }} поз. · {{ kg(s.totals.point_kg) }} кг</div>
+          <div class="mg-sub">{{ s.point_name }} → {{ s.destination }} · {{ s.lines_count }} {{ t('sh.items') }} · {{ kg(s.totals.point_kg) }} {{ t('common.kg') }}</div>
         </div>
         <div class="split num gt-xs">
           <span class="dev-pos">{{ devKg(s.totals.surplus_kg) }}</span>
           <span class="mg-muted"> / </span>
           <span class="dev-neg">{{ devKg(s.totals.shortage_kg) }}</span>
-          <div class="mg-sub">надлишок / недостача, кг</div>
+          <div class="mg-sub">{{ t('sh.split') }}</div>
         </div>
         <div class="total">
           <div class="num text-weight-bold" :class="devClass(s.totals.deviation_amount)">{{ devMoney(s.totals.deviation_amount) }}</div>
-          <div class="mg-sub num">{{ devKg(s.totals.deviation_kg) }} кг</div>
+          <div class="mg-sub num">{{ devKg(s.totals.deviation_kg) }} {{ t('common.kg') }}</div>
         </div>
         <q-icon name="chevron_right" color="grey-5" />
       </div>

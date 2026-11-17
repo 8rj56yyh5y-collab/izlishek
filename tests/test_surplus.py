@@ -96,7 +96,7 @@ def _matcher():
 
     from app.modules.surplus.recognize import Matcher
     from app.modules.surplus.seed import MATERIALS
-    mats = [NS(id=i, name=n, aliases=a, is_active=True) for i, (n, _, _, a) in enumerate(MATERIALS, start=1)]
+    mats = [NS(id=i, name=n, aliases=a, is_active=True) for i, (n, a) in enumerate(MATERIALS, start=1)]
     return Matcher(mats), {m.id: m.name for m in mats}
 
 
@@ -117,22 +117,38 @@ AL(посуда, проф) 8,2
     assert d is not None and (d.day, d.month) == (3, 7)
     got = [(names[i.material_id], i.kg, i.kg2) for i in items]
     assert got == [
-        ("AL (електротех/лом)", 71.9, 65.7),
-        ("Мідь (Cu)", 37.85, None),
-        ("Латунь", 34.45, None),
-        ("AL банка", 12.0, None),
-        ("AL (посуд, профіль)", 8.2, None),
+        ("Алюминий", 71.9, 65.7),
+        ("Медь микс", 37.85, None),
+        ("Латунь/Бронза", 34.45, None),
+        ("Банка", 12.0, None),
+        ("АЛ профиль", 8.2, None),
         ("Титан", 3.9, None),
-        ("Нержавійка", 1.8, None),
+        ("Н/Ж (10%)", 1.8, None),
         ("ЦАМ", 1.4, None),
     ]
 
 
+def test_parse_numbers_inside_names():
+    from app.modules.surplus.recognize import parse_text
+    m, names = _matcher()
+    _, items = parse_text("Медь 1 сорт 37,85 37,5\nН/Ж (10%) 5 кг\nАЛ электротех - 71,9 / 65,7", m)
+    assert [(names[i.material_id], i.kg, i.kg2) for i in items] == [
+        ("Медь 1 сорт", 37.85, 37.5), ("Н/Ж (10%)", 5.0, None), ("АЛ электротех", 71.9, 65.7)]
+
+
+def test_matcher_webmax_names():
+    m, names = _matcher()
+    for raw, want in [("АЛ электротех", "АЛ электротех"), ("ал стружка", "АЛ стружка"), ("Медь 1 сорт", "Медь 1 сорт"),
+                      ("Медная стружка", "Медная стружка"), ("Н/Ж стружка", "Н/Ж стружка"), ("АКБ гелевый", "АКБ гелевый"),
+                      ("Срібло не магніт", "Срібло не магніт"), ("Латунь/Бронза стружка", "Латунь/Бронза стружка")]:
+        assert names[m.match(raw)] == want, raw
+
+
 def test_matcher_cyrillic_lookalikes_and_unknown():
     m, names = _matcher()
-    assert names[m.match("АЛ")] == "AL (електротех/лом)"   # кирилицею
-    assert names[m.match("Са")] == "Мідь (Cu)"             # «Cu» в зошиті схоже на «Са»
-    assert m.match("свинець") is None
+    assert names[m.match("AL")] == "Алюминий"
+    assert names[m.match("Са")] == "Медь микс"             # «Cu» в зошиті схоже на «Са»
+    assert m.match("вольфрам") is None
 
 
 async def test_recognize_text_endpoint_and_photo_without_key(client, monkeypatch):
@@ -140,25 +156,25 @@ async def test_recognize_text_endpoint_and_photo_without_key(client, monkeypatch
     r = await client.post("/api/v1/surplus/recognize", data={"text": "ал 10,5\nщось 3"})
     assert r.status_code == 200, r.text
     items = r.json()["items"]
-    assert items[0]["material_name"] == "AL (електротех/лом)" and items[0]["kg"] == 10.5
+    assert items[0]["material_name"] == "Алюминий" and items[0]["kg"] == 10.5
     assert items[1]["material_id"] is None and items[1]["raw"] == "щось"
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     r = await client.post("/api/v1/surplus/recognize", files={"files": ("a.jpg", b"x", "image/jpeg")})
     assert r.status_code == 503
 
 
-async def test_password(monkeypatch):
-    from httpx import ASGITransport, AsyncClient
-    from fastapi import FastAPI
-    from app.shared.auth import PasswordMiddleware
-    app = FastAPI()
-    app.add_middleware(PasswordMiddleware, password="secret")
-
-    @app.get("/x")
-    async def x():
-        return {}
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        assert (await c.get("/x")).status_code == 401
-        assert (await c.get("/x", auth=("any", "secret"))).status_code == 200
-        assert (await c.get("/x", auth=("any", "nope"))).status_code == 401
+async def test_login_cookie_and_lang(client, monkeypatch):
+    from app.shared.config import get_settings
+    monkeypatch.setenv("APP_PASSWORD", "secret")
+    get_settings.cache_clear()
+    assert (await client.get("/api/v1/auth/status")).json() == {"required": True, "ok": False}
+    r = await client.get("/api/v1/surplus/points", headers={"X-Lang": "ru"})
+    assert r.status_code == 401 and r.json()["detail"] == "Нужно войти"
+    r = await client.post("/api/v1/auth/login", json={"password": "nope"})
+    assert r.status_code == 401 and r.json()["detail"] == "Невірний пароль"
+    r = await client.post("/api/v1/auth/login", json={"password": "secret"})
+    assert r.status_code == 200 and "bt_session" in r.cookies
+    assert (await client.get("/api/v1/surplus/points")).status_code == 200
+    r = await client.get("/api/v1/surplus/shipments/999", headers={"X-Lang": "ru"})
+    assert r.json()["detail"] == "Отгрузка #999 не найдена"
+    assert (await client.get("/api/v1/health")).status_code == 200

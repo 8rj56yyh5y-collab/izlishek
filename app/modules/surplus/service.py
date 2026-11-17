@@ -17,6 +17,7 @@ from app.modules.surplus.models import (
     SurplusShipment,
     SurplusShipmentLine,
 )
+from app.shared.i18n import L
 
 ZERO = Decimal("0")
 
@@ -89,7 +90,7 @@ async def save_point(db: AsyncSession, data: s.PointIn, point_id: int | None = N
         obj = SurplusPoint()
         db.add(obj)
     else:
-        obj = await _get(db, SurplusPoint, point_id, "Пункт")
+        obj = await _get(db, SurplusPoint, point_id, ("Пункт", "Пункт"))
     for k, v in data.model_dump().items():
         setattr(obj, k, v)
     await db.commit()
@@ -107,7 +108,7 @@ async def save_material(db: AsyncSession, data: s.MaterialIn, material_id: int |
         obj = SurplusMaterial()
         db.add(obj)
     else:
-        obj = await _get(db, SurplusMaterial, material_id, "Матеріал")
+        obj = await _get(db, SurplusMaterial, material_id, ("Матеріал", "Материал"))
     for k, v in data.model_dump().items():
         setattr(obj, k, v)
     await db.commit()
@@ -115,10 +116,10 @@ async def save_material(db: AsyncSession, data: s.MaterialIn, material_id: int |
     return obj
 
 
-async def _get(db: AsyncSession, model, obj_id: int, label: str):
+async def _get(db: AsyncSession, model, obj_id: int, label: tuple[str, str]):
     obj = await db.get(model, obj_id)
     if obj is None:
-        raise HTTPException(404, f"{label} #{obj_id} не знайдено")
+        raise HTTPException(404, L(f"{label[0]} #{obj_id} не знайдено", f"{label[1]} #{obj_id} не найден"))
     return obj
 
 
@@ -165,7 +166,7 @@ def shipment_out(sh: SurplusShipment) -> s.ShipmentOut:
 async def get_shipment(db: AsyncSession, shipment_id: int) -> SurplusShipment:
     sh = await db.scalar(_shipment_query().where(SurplusShipment.id == shipment_id))
     if sh is None:
-        raise HTTPException(404, f"Відвантаження #{shipment_id} не знайдено")
+        raise HTTPException(404, L(f"Відвантаження #{shipment_id} не знайдено", f"Отгрузка #{shipment_id} не найдена"))
     return sh
 
 
@@ -189,11 +190,11 @@ async def list_shipments(
 
 
 async def save_shipment(db: AsyncSession, data: s.ShipmentIn, shipment_id: int | None = None) -> SurplusShipment:
-    point = await _get(db, SurplusPoint, data.point_id, "Пункт")
+    point = await _get(db, SurplusPoint, data.point_id, ("Пункт", "Пункт"))
     materials = {m.id: m for m in await list_materials(db)}
     for ln in data.lines:
         if ln.material_id not in materials:
-            raise HTTPException(422, f"Матеріал #{ln.material_id} не знайдено")
+            raise HTTPException(422, L(f"Матеріал #{ln.material_id} не знайдено", f"Материал #{ln.material_id} не найден"))
 
     if shipment_id is None:
         sh = SurplusShipment()
@@ -256,7 +257,7 @@ async def list_settlements(db: AsyncSession, receiver: str | None = None, date_t
 
 
 async def create_settlement(db: AsyncSession, data: s.SettlementIn) -> SurplusSettlement:
-    mat = await _get(db, SurplusMaterial, data.material_id, "Матеріал")
+    mat = await _get(db, SurplusMaterial, data.material_id, ("Матеріал", "Материал"))
     st = SurplusSettlement(
         settle_date=data.settle_date,
         receiver_name=data.receiver_name.strip(),
@@ -275,7 +276,7 @@ async def create_settlement(db: AsyncSession, data: s.SettlementIn) -> SurplusSe
 
 
 async def delete_settlement(db: AsyncSession, settlement_id: int) -> None:
-    st = await _get(db, SurplusSettlement, settlement_id, "Погашення")
+    st = await _get(db, SurplusSettlement, settlement_id, ("Погашення", "Погашение"))
     await db.delete(st)
     await db.commit()
 
@@ -421,7 +422,7 @@ async def receiver_ledger(db: AsyncSession, receiver: str) -> list[s.LedgerRow]:
                         kind="shipment",
                         ref_id=sh.id,
                         on_date=sh.ship_date,
-                        title=f"Відвантаження {sh.point.name} → {sh.destination}",
+                        title=L("Відвантаження", "Отгрузка") + f" {sh.point.name} → {sh.destination}",
                         material_id=ln.material_id,
                         material_name=ln.material.name,
                         kg=float(d),
@@ -441,7 +442,7 @@ async def receiver_ledger(db: AsyncSession, receiver: str) -> list[s.LedgerRow]:
                     kind="settlement",
                     ref_id=st.id,
                     on_date=st.settle_date,
-                    title=st.note or ("Заготовив недостачу" if st.kg > 0 else "Списано надлишок"),
+                    title=st.note or (L("Заготовив недостачу", "Заготовил недостачу") if st.kg > 0 else L("Списано надлишок", "Списан излишек")),
                     material_id=st.material_id,
                     material_name=st.material.name,
                     kg=float(st.kg),
