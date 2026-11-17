@@ -1,12 +1,12 @@
 import { computed, ref } from 'vue'
 import { Dark, setCssVar } from 'quasar'
 
-export type ThemeId = 'copper' | 'steel' | 'khaki'
+export type ThemeId = 'brand' | 'steel' | 'khaki'
 
-/** Три теми. «Мідь» — фірмова й типова: графіт + мідний акцент (металобрухт, але без «завода»).
+/** Три теми. «Брухтарня» — фірмова й типова: майже чорний графіт + жовтий з логотипа.
  *  Кольори кнопок/брендів Quasar беремо звідси ж, токени сторінки — у tokens.css. */
 export const THEMES: { id: ThemeId; dark: boolean; primary: string; positive: string; negative: string; swatch: [string, string] }[] = [
-  { id: 'copper', dark: true, primary: '#C8691C', positive: '#3FB37F', negative: '#F05D5E', swatch: ['#1A1D21', '#D9822B'] },
+  { id: 'brand', dark: true, primary: '#F5B800', positive: '#3DD68C', negative: '#FF6B6B', swatch: ['#111214', '#F5B800'] },
   { id: 'steel', dark: false, primary: '#2F5D8A', positive: '#15803D', negative: '#DC2626', swatch: ['#EEF1F4', '#2F5D8A'] },
   { id: 'khaki', dark: false, primary: '#56652B', positive: '#1F8A5B', negative: '#C62828', swatch: ['#EDEEE4', '#56652B'] },
 ]
@@ -14,9 +14,9 @@ export const THEMES: { id: ThemeId; dark: boolean; primary: string; positive: st
 function stored(): ThemeId {
   try {
     const v = localStorage.getItem('bt_theme')
-    if (v === 'copper' || v === 'steel' || v === 'khaki') return v
+    if (v === 'brand' || v === 'steel' || v === 'khaki') return v
   } catch { /* приватне вікно */ }
-  return 'copper'
+  return 'brand' // у т.ч. колишня «copper»
 }
 
 export const theme = ref<ThemeId>(stored())

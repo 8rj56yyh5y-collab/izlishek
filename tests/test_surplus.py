@@ -167,7 +167,8 @@ async def test_login_cookie_and_lang(client, monkeypatch):
     from app.shared.config import get_settings
     monkeypatch.setenv("APP_PASSWORD", "secret")
     get_settings.cache_clear()
-    assert (await client.get("/api/v1/auth/status")).json() == {"required": True, "ok": False}
+    st = (await client.get("/api/v1/auth/status")).json()
+    assert st["required"] is True and st["ok"] is False
     r = await client.get("/api/v1/surplus/points", headers={"X-Lang": "ru"})
     assert r.status_code == 401 and r.json()["detail"] == "Нужно войти"
     r = await client.post("/api/v1/auth/login", json={"password": "nope"})
@@ -178,3 +179,57 @@ async def test_login_cookie_and_lang(client, monkeypatch):
     r = await client.get("/api/v1/surplus/shipments/999", headers={"X-Lang": "ru"})
     assert r.json()["detail"] == "Отгрузка #999 не найдена"
     assert (await client.get("/api/v1/health")).status_code == 200
+
+
+async def test_receiver_mode_flow(client, monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.shared.config import get_settings
+    from main import app
+    monkeypatch.setenv("APP_PASSWORD", "admin-pw")
+    get_settings.cache_clear()
+    assert (await client.post("/api/v1/auth/login", json={"password": "admin-pw"})).status_code == 200
+    point = (await client.get("/api/v1/surplus/points")).json()[0]
+    al = next(m for m in (await client.get("/api/v1/surplus/materials")).json() if m["name"] == "Алюминий")
+    assert (await client.put(f"/api/v1/surplus/points/{point['id']}/pin", json={"pin": "12"})).status_code == 422
+    r = await client.put(f"/api/v1/surplus/points/{point['id']}/pin", json={"pin": "4321"})
+    assert r.json()["has_pin"] is True
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as rc:
+        # режим вимкнено — PIN не пускає
+        assert (await rc.post("/api/v1/auth/login", json={"password": "4321"})).status_code == 401
+        await client.put("/api/v1/surplus/settings", json={"receiver_mode": True})
+        r = await rc.post("/api/v1/auth/login", json={"password": "4321"})
+        assert r.json()["role"] == "receiver"
+        st = (await rc.get("/api/v1/auth/status")).json()
+        assert st["role"] == "receiver" and st["point_id"] == point["id"]
+        # чуже — заборонено
+        assert (await rc.get("/api/v1/surplus/summary")).status_code == 403
+        assert (await rc.get("/api/v1/surplus/materials")).status_code == 200
+        sub = (await rc.post("/api/v1/receiver/submissions", json={
+            "ship_date": "2026-11-17", "lines": [{"material_id": al["id"], "kg": "30"}]})).json()
+        assert sub["status"] == "pending" and sub["lines"][0]["warehouse_kg"] is None
+
+        # у звітах адміна незвірене не рахується, але є в «чекають звірки»
+        assert (await client.get("/api/v1/surplus/summary")).json()["shipments"] == 0
+        pend = (await client.get("/api/v1/surplus/pending")).json()
+        assert [p["id"] for p in pend] == [sub["id"]]
+        r = await client.put(f"/api/v1/surplus/shipments/{sub['id']}", json={
+            "ship_date": "2026-11-17", "point_id": point["id"],
+            "lines": [{"material_id": al["id"], "point_kg": "30", "warehouse_kg": "33"}]})
+        assert r.status_code == 200
+        assert (await client.get("/api/v1/surplus/pending")).json() == []
+
+        # приймальник бачить результат: +3 кг — його плюс
+        mine = (await rc.get("/api/v1/receiver/submissions")).json()
+        assert mine[0]["status"] == "done" and mine[0]["lines"][0]["deviation_kg"] == 3.0
+        me = (await rc.get("/api/v1/receiver/me")).json()
+        assert me["balance"]["balance_kg"] == 3.0
+        # звірене змінити не може
+        r = await rc.put(f"/api/v1/receiver/submissions/{sub['id']}", json={
+            "ship_date": "2026-11-17", "lines": [{"material_id": al["id"], "kg": "1"}]})
+        assert r.status_code == 409
+
+        # вимкнули режим — сесія приймальника більше не діє
+        await client.put("/api/v1/surplus/settings", json={"receiver_mode": False})
+        assert (await rc.get("/api/v1/receiver/me")).status_code == 401

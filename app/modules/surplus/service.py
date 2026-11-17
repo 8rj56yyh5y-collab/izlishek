@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import secrets
 from collections import defaultdict
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -11,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.modules.surplus import schemas as s
 from app.modules.surplus.models import (
+    SurplusSetting,
     SurplusMaterial,
     SurplusPoint,
     SurplusSettlement,
@@ -176,8 +179,13 @@ async def list_shipments(
     date_to: date | None = None,
     point_id: int | None = None,
     receiver: str | None = None,
+    status: str | None = "done",
 ) -> list[SurplusShipment]:
+    """Типово — лише звірені: незвірені здачі приймальника (pending) не мають ваги складу
+    і в розрахунки відхилень не потрапляють."""
     q = _shipment_query().order_by(SurplusShipment.ship_date.desc(), SurplusShipment.id.desc())
+    if status:
+        q = q.where(SurplusShipment.status == status)
     if date_from:
         q = q.where(SurplusShipment.ship_date >= date_from)
     if date_to:
@@ -209,6 +217,7 @@ async def save_shipment(db: AsyncSession, data: s.ShipmentIn, shipment_id: int |
     sh.receiver_name = (data.receiver_name or "").strip() or point.receiver_name
     sh.destination = data.destination.strip() or "ДМС"
     sh.note = data.note
+    sh.status = "done"  # збереження адміністратором = звірено (у т.ч. добивка здачі приймальника)
     for i, ln in enumerate(data.lines, start=1):
         price = ln.price_per_kg if ln.price_per_kg is not None else materials[ln.material_id].price_per_kg
         sh.lines.append(
@@ -466,3 +475,104 @@ async def receiver_ledger(db: AsyncSession, receiver: str) -> list[s.LedgerRow]:
         rows.append(row)
     rows.reverse()  # свіже — зверху
     return rows
+
+
+
+# ── Налаштування ────────────────────────────────────────────────────────────
+SETTING_DEFAULTS = {"receiver_mode": "0"}
+
+
+async def get_settings_map(db: AsyncSession) -> dict[str, str]:
+    rows = (await db.scalars(select(SurplusSetting))).all()
+    return {**SETTING_DEFAULTS, **{r.key: r.value for r in rows}}
+
+
+async def set_setting(db: AsyncSession, key: str, value: str) -> None:
+    row = await db.get(SurplusSetting, key)
+    if row is None:
+        db.add(SurplusSetting(key=key, value=value))
+    else:
+        row.value = value
+    await db.commit()
+
+
+async def receiver_mode(db: AsyncSession) -> bool:
+    return (await get_settings_map(db)).get("receiver_mode") == "1"
+
+
+# ── PIN приймальника ────────────────────────────────────────────────────────
+def hash_pin(pin: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), 120_000).hex()
+
+
+async def set_point_pin(db: AsyncSession, point_id: int, pin: str | None) -> SurplusPoint:
+    point = await _get(db, SurplusPoint, point_id, ("Пункт", "Пункт"))
+    if pin:
+        for other in await list_points(db):
+            if other.id != point.id and other.pin_hash and hash_pin(pin, other.pin_salt) == other.pin_hash:
+                raise HTTPException(422, L("Такий PIN уже має інший пункт", "Такой PIN уже у другого пункта"))
+        point.pin_salt = secrets.token_hex(16)
+        point.pin_hash = hash_pin(pin, point.pin_salt)
+    else:
+        point.pin_salt = point.pin_hash = None
+    await db.commit()
+    await db.refresh(point)
+    return point
+
+
+async def point_by_pin(db: AsyncSession, pin: str) -> SurplusPoint | None:
+    for p in await list_points(db):
+        if p.is_active and p.pin_hash and secrets.compare_digest(hash_pin(pin, p.pin_salt), p.pin_hash):
+            return p
+    return None
+
+
+# ── Здачі приймальника (pending) ────────────────────────────────────────────
+def submission_out(sh: SurplusShipment) -> s.SubmissionOut:
+    done = sh.status == "done"
+    lines = []
+    for ln in sh.lines:
+        dev = (ln.warehouse_kg - ln.point_kg) if done else None
+        lines.append(s.SubmissionLineOut(
+            material_id=ln.material_id, material_name=ln.material.name, point_kg=_f(ln.point_kg),
+            warehouse_kg=_f(ln.warehouse_kg) if done else None, deviation_kg=_f(dev) if dev is not None else None))
+    return s.SubmissionOut(
+        id=sh.id, ship_date=sh.ship_date, point_id=sh.point_id, point_name=sh.point.name,
+        receiver_name=sh.receiver_name, status=sh.status, note=sh.note,
+        submitted_by_receiver=sh.submitted_by_receiver, lines=lines,
+        totals=shipment_out(sh).totals if done else None,
+    )
+
+
+async def save_submission(db: AsyncSession, point: SurplusPoint, data: s.SubmissionIn,
+                          shipment_id: int | None = None) -> SurplusShipment:
+    materials = {m.id: m for m in await list_materials(db)}
+    for ln in data.lines:
+        if ln.material_id not in materials:
+            raise HTTPException(422, L(f"Матеріал #{ln.material_id} не знайдено", f"Материал #{ln.material_id} не найден"))
+    if shipment_id is None:
+        sh = SurplusShipment(point_id=point.id, receiver_name=point.receiver_name, destination="ДМС",
+                             status="pending", submitted_by_receiver=True)
+        db.add(sh)
+    else:
+        sh = await own_pending(db, point, shipment_id)
+        sh.lines.clear()
+        await db.flush()
+    sh.ship_date = data.ship_date
+    sh.note = data.note
+    for i, ln in enumerate(data.lines, start=1):
+        sh.lines.append(SurplusShipmentLine(line_no=i, material_id=ln.material_id, point_kg=ln.kg,
+                                            warehouse_kg=Decimal("0"), price_per_kg=materials[ln.material_id].price_per_kg))
+    await db.commit()
+    db.expunge_all()
+    return await get_shipment(db, sh.id)
+
+
+async def own_pending(db: AsyncSession, point: SurplusPoint, shipment_id: int) -> SurplusShipment:
+    sh = await get_shipment(db, shipment_id)
+    if sh.point_id != point.id:
+        raise HTTPException(404, L(f"Відвантаження #{shipment_id} не знайдено", f"Отгрузка #{shipment_id} не найдена"))
+    if sh.status != "pending":
+        raise HTTPException(409, L("Склад уже звірив цю здачу — змінити її може лише адміністратор",
+                                   "Склад уже сверил эту сдачу — изменить её может только администратор"))
+    return sh

@@ -2,16 +2,46 @@
 import { t } from '@/i18n'
 import { onMounted, ref } from 'vue'
 import { useQuasar } from 'quasar'
+import axios from 'axios'
 import { apiError, http, type Material, type Point } from '@/api'
 
 const $q = useQuasar()
 const points = ref<Point[]>([])
 const materials = ref<Material[]>([])
 
+// «Версія приймальника»: перемикач і PIN кожного пункту
+const receiverMode = ref(false)
+const passwordOn = ref(true)
+const pins = ref<Record<number, string>>({})
+
 async function load() {
-  const [p, m] = await Promise.all([http.get<Point[]>('/points'), http.get<Material[]>('/materials')])
+  const [p, m, s, st] = await Promise.all([
+    http.get<Point[]>('/points'), http.get<Material[]>('/materials'),
+    http.get<{ receiver_mode: boolean }>('/settings'), axios.get<{ required: boolean }>('/api/v1/auth/status'),
+  ])
   points.value = p.data
   materials.value = m.data
+  receiverMode.value = s.data.receiver_mode
+  passwordOn.value = st.data.required
+}
+
+async function setReceiverMode(v: boolean) {
+  receiverMode.value = v
+  await http.put('/settings', { receiver_mode: v })
+  $q.notify({ type: 'positive', message: t('common.saved'), timeout: 900 })
+}
+
+async function savePin(p: Point, remove = false) {
+  const pin = remove ? null : (pins.value[p.id] ?? '').trim()
+  if (!remove && !/^\d{4,8}$/.test(pin ?? '')) return $q.notify({ type: 'warning', message: t('dir.pinBad') })
+  try {
+    await http.put(`/points/${p.id}/pin`, { pin })
+    pins.value[p.id] = ''
+    $q.notify({ type: 'positive', message: t('common.saved'), timeout: 900 })
+    load()
+  } catch (e) {
+    $q.notify({ type: 'negative', message: apiError(e) })
+  }
 }
 onMounted(load)
 
@@ -55,6 +85,7 @@ function addMat() {
   <q-page class="page">
     <h1 class="mg-h q-mb-md">{{ t('dir.title') }}</h1>
     <div class="cols">
+      <div class="left">
       <div class="mg-card">
         <div class="card-h">
           <div class="text-weight-medium">{{ t('dir.points') }}</div>
@@ -74,7 +105,36 @@ function addMat() {
         </div>
       </div>
 
-      <div class="mg-card">
+      <div class="mg-card rcv">
+        <div class="card-h row items-center no-wrap">
+          <div class="col">
+            <div class="text-weight-medium">{{ t('dir.rcvMode') }}</div>
+            <div class="mg-sub">{{ t('dir.rcvModeSub') }}</div>
+          </div>
+          <q-toggle :model-value="receiverMode" color="primary" @update:model-value="setReceiverMode" />
+        </div>
+        <template v-if="receiverMode">
+          <div v-if="!passwordOn" class="warn"><q-icon name="warning" size="18px" /> {{ t('dir.rcvNeedsPassword') }}</div>
+          <div v-for="p in points.filter((x) => x.is_active)" :key="p.id" class="line pinline">
+            <div class="col">
+              <div class="text-weight-medium">{{ p.name }} · {{ p.receiver_name }}</div>
+              <div class="mg-sub" :class="{ ok: p.has_pin }">
+                <q-icon :name="p.has_pin ? 'check_circle' : 'radio_button_unchecked'" size="14px" />
+                {{ p.has_pin ? t('dir.pinSet') : t('dir.pinNone') }}
+              </div>
+            </div>
+            <q-input v-model="pins[p.id]" dense outlined type="password" inputmode="numeric" maxlength="8"
+              :placeholder="t('dir.pin')" class="pin" @keyup.enter="savePin(p)" />
+            <q-btn unelevated dense no-caps color="primary" :label="t('dir.pinSave')" @click="savePin(p)" />
+            <q-btn v-if="p.has_pin" flat round dense icon="key_off" @click="savePin(p, true)">
+              <q-tooltip>{{ t('dir.pinRemove') }}</q-tooltip>
+            </q-btn>
+          </div>
+        </template>
+      </div>
+      </div>
+
+      <div class="mg-card mats">
         <div class="card-h">
           <div class="text-weight-medium">{{ t('dir.materials') }}</div>
           <div class="mg-sub">{{ t('dir.materialsSub') }}</div>
@@ -105,8 +165,13 @@ function addMat() {
 </template>
 
 <style scoped>
-.page { max-width: 1080px; margin: 0 auto; padding: 20px 16px 32px; }
+.page { max-width: 1080px; margin: 0 auto; padding: 24px 16px 32px; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+.left { display: flex; flex-direction: column; gap: 12px; }
+.pinline { padding: 8px 16px; flex-wrap: wrap; }
+.pin { width: 150px; }
+.ok { color: var(--mg-positive); }
+.warn { display: flex; gap: 8px; align-items: center; padding: 10px 16px; color: var(--mg-warning); background: var(--mg-warning-soft); }
 .card-h { padding: 14px 16px 10px; border-bottom: 1px solid var(--mg-border); }
 .line { display: flex; align-items: center; gap: 8px; padding: 2px 16px; border-bottom: 1px solid var(--mg-border); }
 .line.add { padding: 10px 16px; border-bottom: 0; }

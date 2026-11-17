@@ -2,8 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useQuasar } from 'quasar'
 import { useRouter } from 'vue-router'
-import { apiError, http, type Material, type Point, type RecognizeOut } from '@/api'
-import { todayIso } from '@/format'
+import { apiError, http, type Material, type Point, type RecognizeOut, type Submission } from '@/api'
+import { dateUa, todayIso } from '@/format'
 import { t } from '@/i18n'
 import { seg } from '@/theme'
 import { shrinkImage } from '@/image'
@@ -41,10 +41,32 @@ function setColumn(i: number, c: Column) {
   slots[1 - i].column = c === 'point' ? 'warehouse' : 'point'
 }
 
+// Здачі, які приймальники внесли самі (версія приймальника) — чекають ваги складу.
+const pending = ref<Submission[]>([])
+const pendingId = ref<number | null>(null)
+const pendingSub = computed(() => pending.value.find((x) => x.id === pendingId.value) ?? null)
+
+async function loadPending() {
+  pending.value = (await http.get<Submission[]>('/pending')).data
+}
+
+function openPending(s: Submission) {
+  reset()
+  pendingId.value = s.id
+  form.value = { ...form.value, point_id: s.point_id, receiver_name: s.receiver_name, ship_date: s.ship_date }
+  dateTouched.value = true
+  rows.value = s.lines.map((l) => ({ material_id: l.material_id, point_kg: String(l.point_kg), warehouse_kg: '', price_per_kg: null }))
+  // колонка приймальника вже є — перший вхід одразу під склад
+  setColumn(0, 'warehouse')
+  active.value = 0
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 onMounted(async () => {
   const [p, m] = await Promise.all([http.get<Point[]>('/points'), http.get<Material[]>('/materials')])
   points.value = p.data
   materials.value = m.data
+  loadPending()
   const first = points.value.find((x) => x.is_active)
   if (first) onPoint(first.id)
   window.addEventListener('paste', onPaste)
@@ -129,6 +151,8 @@ function onPaste(ev: ClipboardEvent) {
 }
 
 function reset() {
+  pendingId.value = null
+  setColumn(0, 'point')
   rows.value = []
   dateTouched.value = false
   form.value.ship_date = todayIso()
@@ -147,7 +171,9 @@ async function save() {
   if (res.error) return $q.notify({ type: 'warning', message: res.error })
   saving.value = true
   try {
-    await http.post('/shipments', { ...form.value, lines: res.lines })
+    if (pendingId.value) await http.put(`/shipments/${pendingId.value}`, { ...form.value, lines: res.lines })
+    else await http.post('/shipments', { ...form.value, lines: res.lines })
+    loadPending()
     $q.notify({
       type: 'positive', message: t('rec.savedOk'),
       actions: [{ label: t('rec.toOverview'), color: 'white', handler: () => router.push('/') }],
@@ -166,6 +192,27 @@ async function save() {
     <div class="q-mb-md">
       <h1 class="mg-h">{{ t('rec.title') }}</h1>
       <div class="mg-sub">{{ t('rec.sub') }}</div>
+    </div>
+
+    <div v-if="pendingSub" class="banner q-mb-md">
+      <q-icon name="assignment_ind" size="20px" />
+      <span>{{ t('pend.banner', { who: pendingSub.receiver_name, date: dateUa(pendingSub.ship_date) }) }}</span>
+      <q-space />
+      <q-btn flat dense no-caps :label="t('pend.cancel')" @click="reset" />
+    </div>
+    <div v-else-if="pending.length" class="mg-card q-mb-md pend">
+      <div class="pend-h">
+        <span class="dot" />
+        <span class="text-weight-bold">{{ t('pend.title') }} · {{ pending.length }}</span>
+        <span class="mg-sub gt-xs">{{ t('pend.sub') }}</span>
+      </div>
+      <div class="pend-list">
+        <button v-for="s in pending" :key="s.id" type="button" class="pend-item" @click="openPending(s)">
+          <div class="text-weight-medium">{{ s.receiver_name }}</div>
+          <div class="mg-sub">{{ dateUa(s.ship_date) }} · {{ s.point_name }} · {{ s.lines.length }} {{ t('sh.items') }}</div>
+          <span class="go">{{ t('pend.open') }} <q-icon name="arrow_forward" size="16px" /></span>
+        </button>
+      </div>
     </div>
 
     <div class="mg-card q-pa-md q-mb-md head">
@@ -257,7 +304,17 @@ async function save() {
   .slots { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
-  .savebar { bottom: calc(58px + env(safe-area-inset-bottom)); }
+  .savebar { bottom: calc(62px + env(safe-area-inset-bottom)); }
   .savebar .q-btn:last-child { flex: 1; }
 }
+.banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--mg-radius-lg);
+  background: var(--mg-primary-soft); border: 1px solid color-mix(in srgb, var(--mg-primary) 45%, transparent); font-weight: 600; }
+.pend { padding: 14px 16px; }
+.pend-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.pend-h .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mg-primary); box-shadow: 0 0 0 4px var(--mg-primary-soft); }
+.pend-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.pend-item { text-align: left; padding: 12px 14px; border-radius: var(--mg-radius-md); border: 1px solid var(--mg-border);
+  background: var(--mg-bg-2); color: var(--mg-fg); font: inherit; cursor: pointer; transition: border-color 0.2s, transform 0.2s; }
+.pend-item:hover { border-color: var(--mg-primary); transform: translateY(-1px); }
+.pend-item .go { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; color: var(--mg-primary); font-weight: 700; font-size: 13px; }
 </style>

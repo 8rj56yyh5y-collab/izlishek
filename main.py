@@ -8,12 +8,14 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.modules.surplus import models  # noqa: F401 — реєстрація таблиць
+from app.modules.surplus.receiver_router import router as receiver_router
 from app.modules.surplus.router import router as surplus_router
 from app.modules.surplus.seed import seed
 from app.shared.auth import AuthMiddleware
 from app.shared.auth import router as auth_router
 from app.shared.config import get_settings
 from app.shared.i18n import LangMiddleware
+from app.shared.schema_sync import add_missing_columns
 from app.shared.database import Base, get_engine, get_session
 
 SPA = Path(__file__).parent / "static" / "spa"
@@ -23,6 +25,7 @@ SPA = Path(__file__).parent / "static" / "spa"
 async def lifespan(_: FastAPI):
     async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(add_missing_columns)
     async for db in get_session():
         await seed(db, demo=get_settings().seed_demo)
     yield
@@ -34,6 +37,7 @@ app.add_middleware(AuthMiddleware)
 app.add_middleware(LangMiddleware)
 app.include_router(auth_router)
 app.include_router(surplus_router)
+app.include_router(receiver_router)
 
 
 @app.get("/api/v1/health", tags=["system"])
@@ -46,6 +50,10 @@ if SPA.exists():
 
     @app.get("/app/{path:path}", include_in_schema=False)
     async def spa(path: str):
+        # Файли з public/ (логотип, іконки) — як є; решта шляхів — SPA-маршрути.
+        f = (SPA / path).resolve()
+        if path and f.is_file() and SPA.resolve() in f.parents:
+            return FileResponse(f)
         return FileResponse(SPA / "index.html")
 
 

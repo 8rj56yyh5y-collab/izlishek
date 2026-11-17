@@ -15,7 +15,7 @@ http.interceptors.response.use(undefined, (err) => {
   return Promise.reject(err)
 })
 
-export interface Point { id: number; name: string; receiver_name: string; is_active: boolean }
+export interface Point { id: number; name: string; receiver_name: string; is_active: boolean; has_pin: boolean }
 export interface Material { id: number; name: string; group: string; price_per_kg: number; aliases: string | null; sort: number; is_active: boolean }
 export interface Totals {
   point_kg: number; warehouse_kg: number; deviation_kg: number
@@ -82,3 +82,26 @@ export interface RecognizedItem {
   raw: string; material_id: number | null; material_name: string | null; kg: number | null; kg2: number | null
 }
 export interface RecognizeOut { source: 'text' | 'photo'; date: string | null; items: RecognizedItem[] }
+
+export interface SubmissionLine {
+  material_id: number; material_name: string; point_kg: number; warehouse_kg: number | null; deviation_kg: number | null
+}
+export interface Submission {
+  id: number; ship_date: string; point_id: number; point_name: string; receiver_name: string
+  status: 'pending' | 'done'; note: string | null; submitted_by_receiver: boolean
+  lines: SubmissionLine[]; totals: Totals | null
+}
+export interface ReceiverMe { point_id: number; point_name: string; receiver_name: string; balance: ReceiverBalance | null }
+
+/** API «версії приймальника» — окрема база шляхів. */
+export const rhttp = axios.create({ baseURL: '/api/v1/receiver' })
+for (const inst of [rhttp]) {
+  inst.interceptors.request.use((cfg) => {
+    cfg.headers.set('X-Lang', lang.value)
+    return cfg
+  })
+  inst.interceptors.response.use(undefined, (err) => {
+    if (err?.response?.status === 401) authLost.value = true
+    return Promise.reject(err)
+  })
+}

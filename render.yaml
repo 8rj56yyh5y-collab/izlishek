@@ -12,6 +12,8 @@ services:
           property: connectionString
       - key: APP_PASSWORD       # спільний пароль на вхід; подивитись: Environment у сервісі
         generateValue: true
+      - key: SECRET_KEY         # підпис сесій (не міняти — інакше всіх розлогінить)
+        generateValue: true
       - key: IZLISHEK_SEED_DEMO # 0 — без демо-відвантажень (довідники створяться все одно)
         value: "0"
       - key: ANTHROPIC_API_KEY  # для розпізнавання фото; без нього працює лише текст

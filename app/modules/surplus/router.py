@@ -16,17 +16,40 @@ router = APIRouter(prefix="/api/v1/surplus", tags=["surplus"])
 
 @router.get("/points", response_model=list[s.PointOut])
 async def points(session: SessionDep):
-    return await service.list_points(session)
+    return [s.PointOut.of(p) for p in await service.list_points(session)]
 
 
 @router.post("/points", response_model=s.PointOut, status_code=201)
 async def create_point(data: s.PointIn, session: SessionDep):
-    return await service.save_point(session, data)
+    return s.PointOut.of(await service.save_point(session, data))
 
 
 @router.put("/points/{point_id}", response_model=s.PointOut)
 async def update_point(point_id: int, data: s.PointIn, session: SessionDep):
-    return await service.save_point(session, data, point_id)
+    return s.PointOut.of(await service.save_point(session, data, point_id))
+
+
+@router.put("/points/{point_id}/pin", response_model=s.PointOut)
+async def set_pin(point_id: int, data: s.PinIn, session: SessionDep):
+    """PIN приймальника для входу у його версію; порожній — вимкнути вхід."""
+    return s.PointOut.of(await service.set_point_pin(session, point_id, data.pin))
+
+
+@router.get("/settings", response_model=s.SettingsIO)
+async def get_app_settings(session: SessionDep):
+    return s.SettingsIO(receiver_mode=await service.receiver_mode(session))
+
+
+@router.put("/settings", response_model=s.SettingsIO)
+async def put_app_settings(data: s.SettingsIO, session: SessionDep):
+    await service.set_setting(session, "receiver_mode", "1" if data.receiver_mode else "0")
+    return data
+
+
+@router.get("/pending", response_model=list[s.SubmissionOut])
+async def pending(session: SessionDep):
+    """Здачі приймальників, які чекають ваги складу."""
+    return [service.submission_out(x) for x in await service.list_shipments(session, status="pending")]
 
 
 @router.get("/materials", response_model=list[s.MaterialOut])

@@ -23,6 +23,19 @@ class PointOut(_Orm):
     name: str
     receiver_name: str
     is_active: bool
+    has_pin: bool = False
+
+    @classmethod
+    def of(cls, p) -> PointOut:
+        return cls(id=p.id, name=p.name, receiver_name=p.receiver_name, is_active=p.is_active, has_pin=bool(p.pin_hash))
+
+
+class PinIn(BaseModel):
+    pin: str | None = Field(default=None, pattern=r"^\d{4,8}$")
+
+
+class SettingsIO(BaseModel):
+    receiver_mode: bool
 
 
 class MaterialIn(BaseModel):
@@ -217,3 +230,51 @@ class RecognizeOut(BaseModel):
     source: str  # text | photo
     date: date | None
     items: list[RecognizedItem]
+
+
+# ── Здачі приймальника ──────────────────────────────────────────────────────
+class SubmissionLineIn(BaseModel):
+    material_id: int
+    kg: Decimal = Field(ge=0)
+
+
+class SubmissionIn(BaseModel):
+    ship_date: date
+    note: str | None = None
+    lines: list[SubmissionLineIn] = Field(min_length=1)
+
+    @field_validator("lines")
+    @classmethod
+    def _unique_materials(cls, v: list[SubmissionLineIn]) -> list[SubmissionLineIn]:
+        ids = [ln.material_id for ln in v]
+        if len(ids) != len(set(ids)):
+            raise ValueError(L("Один матеріал не може бути у відвантаженні двічі", "Один материал не может быть в отгрузке дважды"))
+        return v
+
+
+class SubmissionLineOut(BaseModel):
+    material_id: int
+    material_name: str
+    point_kg: float
+    warehouse_kg: float | None
+    deviation_kg: float | None
+
+
+class SubmissionOut(BaseModel):
+    id: int
+    ship_date: date
+    point_id: int
+    point_name: str
+    receiver_name: str
+    status: str
+    note: str | None
+    submitted_by_receiver: bool
+    lines: list[SubmissionLineOut]
+    totals: Totals | None
+
+
+class ReceiverMe(BaseModel):
+    point_id: int
+    point_name: str
+    receiver_name: str
+    balance: ReceiverBalance | None

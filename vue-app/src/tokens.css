@@ -1,57 +1,67 @@
-/* Токени у стилі Gobsek (--mg-*), три теми: copper (типова, темна), steel, khaki.
-   Тема ставиться атрибутом html[data-theme], див. theme.ts. */
+/* Токени у стилі Gobsek (--mg-*). Три теми: brand (типова, темна, жовтий з логотипа), steel, khaki.
+   Тема ставиться атрибутом html[data-theme] (див. theme.ts і скрипт в index.html). */
 :root, :root[data-theme="steel"] {
   --mg-primary: #2F5D8A;
+  --mg-on-primary: #FFFFFF;
   --mg-primary-soft: rgba(47, 93, 138, 0.12);
   --mg-positive: #15803D;
   --mg-positive-soft: rgba(21, 128, 61, 0.10);
   --mg-negative: #DC2626;
-  --mg-negative-soft: rgba(220, 38, 38, 0.10);
+  --mg-negative-soft: rgba(220, 38, 38, 0.09);
   --mg-warning: #B45309;
   --mg-warning-soft: rgba(232, 150, 19, 0.16);
   --mg-bg: #FFFFFF;
-  --mg-bg-2: #EEF1F4;
-  --mg-fg: rgba(13, 22, 32, 0.90);
-  --mg-fg-2: rgba(13, 22, 32, 0.70);
-  --mg-fg-3: rgba(13, 22, 32, 0.56);
-  --mg-border: rgba(13, 22, 32, 0.09);
-  --mg-border-strong: rgba(13, 22, 32, 0.20);
+  --mg-bg-2: #EEF1F5;
+  --mg-bg-3: #FFFFFF;
+  --mg-fg: #0F1720;
+  --mg-fg-2: rgba(15, 23, 32, 0.70);
+  --mg-fg-3: rgba(15, 23, 32, 0.52);
+  --mg-border: rgba(15, 23, 32, 0.08);
+  --mg-border-strong: rgba(15, 23, 32, 0.18);
+  --mg-shadow: 0 1px 2px rgba(15, 23, 32, 0.04), 0 8px 24px -12px rgba(15, 23, 32, 0.12);
 }
 :root[data-theme="khaki"] {
   --mg-primary: #56652B;
+  --mg-on-primary: #FFFFFF;
   --mg-primary-soft: rgba(86, 101, 43, 0.12);
   --mg-positive: #1F8A5B;
-  --mg-positive-soft: rgba(31, 138, 91, 0.12);
+  --mg-positive-soft: rgba(31, 138, 91, 0.11);
   --mg-negative: #C62828;
-  --mg-negative-soft: rgba(198, 40, 40, 0.10);
+  --mg-negative-soft: rgba(198, 40, 40, 0.09);
   --mg-warning: #A15C07;
   --mg-warning-soft: rgba(214, 140, 20, 0.18);
   --mg-bg: #FBFBF6;
-  --mg-bg-2: #EAECDF;
-  --mg-fg: rgba(28, 33, 20, 0.92);
+  --mg-bg-2: #E9EBDF;
+  --mg-bg-3: #FBFBF6;
+  --mg-fg: #1C2114;
   --mg-fg-2: rgba(28, 33, 20, 0.72);
-  --mg-fg-3: rgba(28, 33, 20, 0.58);
-  --mg-border: rgba(28, 33, 20, 0.10);
-  --mg-border-strong: rgba(28, 33, 20, 0.22);
+  --mg-fg-3: rgba(28, 33, 20, 0.54);
+  --mg-border: rgba(28, 33, 20, 0.09);
+  --mg-border-strong: rgba(28, 33, 20, 0.20);
+  --mg-shadow: 0 1px 2px rgba(28, 33, 20, 0.05), 0 8px 24px -12px rgba(28, 33, 20, 0.14);
 }
-:root[data-theme="copper"] {
-  --mg-primary: #D9822B;
-  --mg-primary-soft: rgba(217, 130, 43, 0.16);
-  --mg-positive: #3FB37F;
-  --mg-positive-soft: rgba(63, 179, 127, 0.14);
-  --mg-negative: #F05D5E;
-  --mg-negative-soft: rgba(240, 93, 94, 0.14);
-  --mg-warning: #E8B04A;
-  --mg-warning-soft: rgba(232, 176, 74, 0.16);
-  --mg-bg: #1C1F24;
-  --mg-bg-2: #131518;
-  --mg-fg: #ECE7E1;
-  --mg-fg-2: #B9B1A8;
-  --mg-fg-3: #8F877E;
-  --mg-border: rgba(255, 255, 255, 0.08);
-  --mg-border-strong: rgba(255, 255, 255, 0.18);
+:root[data-theme="brand"] {
+  --mg-primary: #F5B800;
+  --mg-on-primary: #15120A;
+  --mg-primary-soft: rgba(245, 184, 0, 0.13);
+  --mg-positive: #3DD68C;
+  --mg-positive-soft: rgba(61, 214, 140, 0.12);
+  --mg-negative: #FF6B6B;
+  --mg-negative-soft: rgba(255, 107, 107, 0.12);
+  /* «невпізнаний матеріал» — помаранчевий, щоб не зливатися з фірмовим жовтим */
+  --mg-warning: #FF8A3D;
+  --mg-warning-soft: rgba(255, 138, 61, 0.13);
+  --mg-bg: #17181B;
+  --mg-bg-2: #0D0E10;
+  --mg-bg-3: #1D1F23;
+  --mg-fg: #F2EFE8;
+  --mg-fg-2: #BAB5AA;
+  --mg-fg-3: #85817A;
+  --mg-border: rgba(255, 255, 255, 0.07);
+  --mg-border-strong: rgba(255, 255, 255, 0.16);
+  --mg-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 30px -18px rgba(0, 0, 0, 0.8);
 }
-:root { --mg-radius-md: 8px; --mg-radius-lg: 12px; }
+:root { --mg-radius-sm: 8px; --mg-radius-md: 10px; --mg-radius-lg: 16px; --mg-display: 'Unbounded', 'Inter', sans-serif; }
 
 html, body, #app {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -60,7 +70,24 @@ html, body, #app {
   background: var(--mg-bg-2);
 }
 body.body--dark { background: var(--mg-bg-2); }
-.body--dark .q-card, .body--dark .q-menu { background: var(--mg-bg); }
+.body--dark .q-card, .body--dark .q-menu, .body--dark .q-dialog__inner > div { background: var(--mg-bg-3); }
+::selection { background: var(--mg-primary-soft); }
+
+/* ── сучасніший вигляд компонентів Quasar ───────────────────────────────── */
+.q-btn { border-radius: var(--mg-radius-md); font-weight: 600; letter-spacing: 0; }
+.q-btn.bg-primary { color: var(--mg-on-primary) !important; }
+.q-btn.bg-primary .q-focus-helper { opacity: 0.12; }
+.q-btn-toggle { border-radius: var(--mg-radius-md); overflow: hidden; }
+.q-btn-toggle .q-btn { border-radius: 0; }
+.q-field--outlined .q-field__control { border-radius: var(--mg-radius-md); }
+.q-field--outlined .q-field__control:before { border-color: var(--mg-border-strong); }
+.q-card { border-radius: var(--mg-radius-lg) !important; box-shadow: var(--mg-shadow); }
+.q-menu { border-radius: var(--mg-radius-md); border: 1px solid var(--mg-border); box-shadow: var(--mg-shadow); }
+.q-notification { border-radius: var(--mg-radius-md); }
+.q-tab { border-radius: var(--mg-radius-md); }
+.q-tab__label { font-weight: 600; }
+
+/* ── власні класи ───────────────────────────────────────────────────────── */
 .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dev-pos { color: var(--mg-positive); font-weight: 600; }
 .dev-neg { color: var(--mg-negative); font-weight: 600; }
@@ -69,8 +96,12 @@ body.body--dark { background: var(--mg-bg-2); }
   background: var(--mg-bg);
   border: 1px solid var(--mg-border);
   border-radius: var(--mg-radius-lg);
+  box-shadow: var(--mg-shadow);
 }
 .mg-muted { color: var(--mg-fg-3); }
-.mg-h { font-size: 20px; line-height: 28px; font-weight: 600; margin: 0; letter-spacing: 0; }
+.mg-h { font-family: var(--mg-display); font-size: 22px; line-height: 30px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 .mg-sub { font-size: 13px; color: var(--mg-fg-3); }
 .mg-accent { color: var(--mg-primary); }
+.mg-page-in { animation: mg-page-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes mg-page-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .mg-page-in { animation: none; } }

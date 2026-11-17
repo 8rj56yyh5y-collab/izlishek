@@ -42,6 +42,9 @@ class SurplusPoint(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     receiver_name: Mapped[str] = mapped_column(String(120), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # PIN приймальника для входу у «версію приймальника» (pbkdf2; сам PIN не зберігаємо).
+    pin_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    pin_salt: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
 
@@ -71,6 +74,10 @@ class SurplusShipment(Base):
     # Знімок: приймальник на пункті може змінитися, а відповідальність лишається за тим, хто був.
     receiver_name: Mapped[str] = mapped_column(String(120), nullable=False)
     destination: Mapped[str] = mapped_column(String(120), nullable=False, default="ДМС")
+    # pending — приймальник вніс свою колонку, склад ще не звірив (warehouse_kg = 0 і в розрахунки не йде);
+    # done — звірено, рахується у відхиленнях і балансах.
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="done", server_default="done")
+    submitted_by_receiver: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
@@ -110,3 +117,12 @@ class SurplusSettlement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
     material: Mapped[SurplusMaterial] = relationship()
+
+
+class SurplusSetting(Base):
+    """Налаштування програми: ключ → значення (рядок)."""
+
+    __tablename__ = "surplus_settings"
+
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
