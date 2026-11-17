@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 
 from app.modules.surplus import schemas as s
 from app.modules.surplus import service
+from app.modules.surplus import recognize as rec
 from app.modules.surplus.export import build_xlsx
 from app.shared.database import SessionDep
 
@@ -121,4 +122,45 @@ async def export_xlsx(
         data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="izlishek.xlsx"'},
+    )
+
+
+_MAX_IMAGE = 8 * 1024 * 1024
+
+
+@router.post("/recognize", response_model=s.RecognizeOut)
+async def recognize(
+    session: SessionDep,
+    text: str | None = Form(default=None),
+    files: list[UploadFile] | None = File(default=None),
+):
+    """Фото (до 5 штук) або текст → рядки «матеріал / вага» для однієї колонки."""
+    materials = await service.list_materials(session)
+    matcher = rec.Matcher(materials)
+    names = {m.id: m.name for m in materials}
+    if files:
+        if len(files) > 5:
+            raise HTTPException(422, "Не більше 5 фото за раз")
+        images = []
+        for f in files:
+            data = await f.read()
+            if len(data) > _MAX_IMAGE:
+                raise HTTPException(413, "Фото завелике (макс. 8 МБ)")
+            mt = f.content_type or "image/jpeg"
+            if mt not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+                raise HTTPException(415, "Підтримуються JPEG, PNG, WebP")
+            images.append((data, mt))
+        found_date, items = await rec.parse_images(images, materials, matcher)
+        source = "photo"
+    elif text and text.strip():
+        found_date, items = rec.parse_text(text, matcher)
+        source = "text"
+    else:
+        raise HTTPException(422, "Додайте фото або текст")
+    return s.RecognizeOut(
+        source=source,
+        date=found_date,
+        items=[s.RecognizedItem(raw=i.raw, material_id=i.material_id,
+                                material_name=names.get(i.material_id) if i.material_id else None,
+                                kg=i.kg, kg2=i.kg2) for i in items],
     )

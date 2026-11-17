@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.modules.surplus import models  # noqa: F401 — реєстрація таблиць
 from app.modules.surplus.router import router as surplus_router
 from app.modules.surplus.seed import seed
+from app.shared.auth import PasswordMiddleware
 from app.shared.config import get_settings
 from app.shared.database import Base, get_engine, get_session
 
@@ -20,13 +21,14 @@ SPA = Path(__file__).parent / "static" / "spa"
 async def lifespan(_: FastAPI):
     async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    if get_settings().seed_demo:
-        async for db in get_session():
-            await seed(db)
+    async for db in get_session():
+        await seed(db, demo=get_settings().seed_demo)
     yield
 
 
 app = FastAPI(title="Надлишки приймальника", lifespan=lifespan, docs_url="/api/docs")
+if get_settings().app_password:
+    app.add_middleware(PasswordMiddleware, password=get_settings().app_password)
 app.include_router(surplus_router)
 
 

@@ -1,0 +1,7 @@
+.git
+**/node_modules
+static/spa
+*.db
+__pycache__
+.pytest_cache
+docs/screenshots

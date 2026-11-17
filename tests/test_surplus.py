@@ -89,3 +89,76 @@ async def test_update_keeps_price_snapshot_and_export(client):
     assert got["lines"][0]["price_per_kg"] == 60.0
     r = await client.get("/api/v1/surplus/export.xlsx")
     assert r.status_code == 200 and r.content[:2] == b"PK"
+
+
+def _matcher():
+    from types import SimpleNamespace as NS
+
+    from app.modules.surplus.recognize import Matcher
+    from app.modules.surplus.seed import MATERIALS
+    mats = [NS(id=i, name=n, aliases=a, is_active=True) for i, (n, _, _, a) in enumerate(MATERIALS, start=1)]
+    return Matcher(mats), {m.id: m.name for m in mats}
+
+
+def test_parse_notebook_text():
+    from app.modules.surplus.recognize import parse_text
+    m, names = _matcher()
+    text = """03.07
+AL 71,9 65,7
+Cu 37,85
+Латунь 34,45
+AL банка 12
+AL(посуда, проф) 8,2
+Титан 3,9
+Нерж 1,8
+ЦАМ 1,4
+"""
+    d, items = parse_text(text, m)
+    assert d is not None and (d.day, d.month) == (3, 7)
+    got = [(names[i.material_id], i.kg, i.kg2) for i in items]
+    assert got == [
+        ("AL (електротех/лом)", 71.9, 65.7),
+        ("Мідь (Cu)", 37.85, None),
+        ("Латунь", 34.45, None),
+        ("AL банка", 12.0, None),
+        ("AL (посуд, профіль)", 8.2, None),
+        ("Титан", 3.9, None),
+        ("Нержавійка", 1.8, None),
+        ("ЦАМ", 1.4, None),
+    ]
+
+
+def test_matcher_cyrillic_lookalikes_and_unknown():
+    m, names = _matcher()
+    assert names[m.match("АЛ")] == "AL (електротех/лом)"   # кирилицею
+    assert names[m.match("Са")] == "Мідь (Cu)"             # «Cu» в зошиті схоже на «Са»
+    assert m.match("свинець") is None
+
+
+async def test_recognize_text_endpoint_and_photo_without_key(client, monkeypatch):
+    # Довідники засіваються завжди, навіть без демо-даних.
+    r = await client.post("/api/v1/surplus/recognize", data={"text": "ал 10,5\nщось 3"})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert items[0]["material_name"] == "AL (електротех/лом)" and items[0]["kg"] == 10.5
+    assert items[1]["material_id"] is None and items[1]["raw"] == "щось"
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    r = await client.post("/api/v1/surplus/recognize", files={"files": ("a.jpg", b"x", "image/jpeg")})
+    assert r.status_code == 503
+
+
+async def test_password(monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+    from fastapi import FastAPI
+    from app.shared.auth import PasswordMiddleware
+    app = FastAPI()
+    app.add_middleware(PasswordMiddleware, password="secret")
+
+    @app.get("/x")
+    async def x():
+        return {}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/x")).status_code == 401
+        assert (await c.get("/x", auth=("any", "secret"))).status_code == 200
+        assert (await c.get("/x", auth=("any", "nope"))).status_code == 401

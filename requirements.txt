@@ -1,8 +1,11 @@
 fastapi>=0.115
-uvicorn>=0.30
+uvicorn[standard]>=0.30
 sqlalchemy[asyncio]>=2.0
 aiosqlite>=0.20
+asyncpg>=0.29
 openpyxl>=3.1
+python-multipart>=0.0.9
+anthropic>=2.9
 # тести
 pytest>=8
 pytest-asyncio>=0.24

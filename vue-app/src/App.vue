@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const tabs = [
+  { to: '/reconcile', label: 'Звірка', icon: 'compare_arrows' },
   { to: '/', label: 'Огляд', icon: 'insights' },
   { to: '/shipments', label: 'Відвантаження', icon: 'local_shipping' },
   { to: '/directory', label: 'Довідники', icon: 'tune' },

@@ -54,6 +54,8 @@ class SurplusMaterial(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     group: Mapped[str] = mapped_column(String(20), nullable=False, default="color")  # color | ferrous
     price_per_kg: Mapped[Decimal] = mapped_column(PRICE, nullable=False, default=0)
+    # Як матеріал пишуть у зошитах/скрінах, через кому: «al, ал, алюміній».
+    aliases: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 

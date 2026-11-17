@@ -27,7 +27,7 @@ async function savePoint(p: Partial<Point>) {
 }
 async function saveMaterial(m: Partial<Material>) {
   try {
-    const body = { name: m.name, group: m.group ?? 'color', price_per_kg: m.price_per_kg ?? 0, sort: m.sort ?? 100, is_active: m.is_active ?? true }
+    const body = { name: m.name, aliases: m.aliases ?? null, group: m.group ?? 'color', price_per_kg: m.price_per_kg ?? 0, sort: m.sort ?? 100, is_active: m.is_active ?? true }
     if (m.id) await http.put(`/materials/${m.id}`, body)
     else await http.post('/materials', body)
     $q.notify({ type: 'positive', message: 'Збережено', timeout: 900 })
@@ -79,7 +79,13 @@ function addMat() {
           <div class="mg-sub">Ціна фіксується у відвантаженні на момент збереження</div>
         </div>
         <div v-for="m in materials" :key="m.id" class="line">
-          <q-input v-model="m.name" dense borderless class="col" @change="saveMaterial(m)" />
+          <div class="col">
+            <q-input v-model="m.name" dense borderless @change="saveMaterial(m)" />
+            <q-input v-model="m.aliases" dense borderless placeholder="як пишуть: al, ал, алюміній" class="alias"
+              @change="saveMaterial(m)">
+              <q-tooltip>Через кому — так фото й текст впізнають цей матеріал</q-tooltip>
+            </q-input>
+          </div>
           <q-input v-model.number="m.price_per_kg" type="number" dense outlined suffix="₴" class="price"
             input-class="text-right num" @change="saveMaterial(m)" />
           <q-toggle v-model="m.is_active" dense @update:model-value="saveMaterial(m)">
@@ -104,5 +110,7 @@ function addMat() {
 .line { display: flex; align-items: center; gap: 8px; padding: 2px 16px; border-bottom: 1px solid var(--mg-border); }
 .line.add { padding: 10px 16px; border-bottom: 0; }
 .price { width: 110px; }
+.alias { margin-top: -10px; }
+.alias :deep(input) { font-size: 12px; color: var(--mg-fg-3); }
 @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
 </style>

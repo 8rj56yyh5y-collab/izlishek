@@ -17,14 +17,14 @@ from app.modules.surplus import service
 from app.modules.surplus.models import SurplusMaterial, SurplusPoint
 
 MATERIALS = [
-    ("AL (електротех/лом)", "color", "60"),
-    ("Мідь (Cu)", "color", "330"),
-    ("Латунь", "color", "200"),
-    ("AL банка", "color", "45"),
-    ("AL (посуд, профіль)", "color", "70"),
-    ("Титан", "color", "80"),
-    ("Нержавійка", "color", "40"),
-    ("ЦАМ", "color", "50"),
+    ("AL (електротех/лом)", "color", "60", "al, ал, алюм, алюміній, алюминий"),
+    ("Мідь (Cu)", "color", "330", "cu, са, си, мідь, медь, мед"),
+    ("Латунь", "color", "200", "латунь, латун, лат"),
+    ("AL банка", "color", "45", "банка, банки, баночка"),
+    ("AL (посуд, профіль)", "color", "70", "посуд, посуда, профіль, профиль, проф"),
+    ("Титан", "color", "80", "титан, тітан, ti"),
+    ("Нержавійка", "color", "40", "нерж, нержавейка, нержавійка, нержавка"),
+    ("ЦАМ", "color", "50", "цам"),
 ]
 
 # Сторінка зошита: «Я» (пункт) | «ДМС» (склад)
@@ -47,15 +47,18 @@ DEMO = [
 ]
 
 
-async def seed(db: AsyncSession) -> None:
+async def seed(db: AsyncSession, demo: bool = True) -> None:
+    """Довідники — завжди при порожній базі; приклад і демо-відвантаження — лише з demo."""
     if await db.scalar(select(func.count()).select_from(SurplusMaterial)):
         return
-    for i, (name, group, price) in enumerate(MATERIALS, start=1):
-        db.add(SurplusMaterial(name=name, group=group, price_per_kg=D(price), sort=i * 10))
+    for i, (name, group, price, aliases) in enumerate(MATERIALS, start=1):
+        db.add(SurplusMaterial(name=name, group=group, price_per_kg=D(price), aliases=aliases, sort=i * 10))
     p1 = SurplusPoint(name="Пункт №1", receiver_name="Приймальник 1")
     p2 = SurplusPoint(name="Пункт №2", receiver_name="Приймальник 2")
     db.add_all([p1, p2])
     await db.commit()
+    if not demo:
+        return
 
     mats = {m.name: m.id for m in await service.list_materials(db)}
 

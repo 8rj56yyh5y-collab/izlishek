@@ -3,7 +3,7 @@ import axios from 'axios'
 export const http = axios.create({ baseURL: '/api/v1/surplus' })
 
 export interface Point { id: number; name: string; receiver_name: string; is_active: boolean }
-export interface Material { id: number; name: string; group: string; price_per_kg: number; sort: number; is_active: boolean }
+export interface Material { id: number; name: string; group: string; price_per_kg: number; aliases: string | null; sort: number; is_active: boolean }
 export interface Totals {
   point_kg: number; warehouse_kg: number; deviation_kg: number
   surplus_kg: number; shortage_kg: number
@@ -64,3 +64,8 @@ export function apiError(e: unknown): string {
   if (Array.isArray(d)) return d.map((x: { msg?: string }) => x.msg ?? '').join('; ')
   return 'Помилка запиту'
 }
+
+export interface RecognizedItem {
+  raw: string; material_id: number | null; material_name: string | null; kg: number | null; kg2: number | null
+}
+export interface RecognizeOut { source: 'text' | 'photo'; date: string | null; items: RecognizedItem[] }

@@ -1,0 +1,24 @@
+# Render Blueprint: New → Blueprint → вибрати цей репозиторій.
+services:
+  - type: web
+    name: izlishek
+    runtime: docker
+    plan: free          # free засинає після 15 хв без запитів (перший вхід ~50 с). Для швидкості — starter.
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: izlishek-db
+          property: connectionString
+      - key: APP_PASSWORD       # спільний пароль на вхід; подивитись: Environment у сервісі
+        generateValue: true
+      - key: IZLISHEK_SEED_DEMO # 0 — без демо-відвантажень (довідники створяться все одно)
+        value: "0"
+      - key: ANTHROPIC_API_KEY  # для розпізнавання фото; без нього працює лише текст
+        sync: false
+
+databases:
+  - name: izlishek-db
+    plan: free          # ⚠ безкоштовна база Render видаляється через 30 днів — для роботи візьміть basic
+    databaseName: izlishek
+    user: izlishek

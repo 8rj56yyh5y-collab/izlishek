@@ -28,6 +28,7 @@ class MaterialIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     group: str = Field(default="color", pattern="^(color|ferrous)$")
     price_per_kg: Decimal = Field(ge=0)
+    aliases: str | None = None
     sort: int = 100
     is_active: bool = True
 
@@ -37,6 +38,7 @@ class MaterialOut(_Orm):
     name: str
     group: str
     price_per_kg: float
+    aliases: str | None
     sort: int
     is_active: bool
 
@@ -200,3 +202,17 @@ class LedgerRow(BaseModel):
     amount: float
     balance_kg: float       # наростаючий баланс по цьому матеріалу
     balance_amount: float   # наростаючий баланс у грошах (по всіх матеріалах)
+
+
+class RecognizedItem(BaseModel):
+    raw: str
+    material_id: int | None
+    material_name: str | None
+    kg: float | None
+    kg2: float | None
+
+
+class RecognizeOut(BaseModel):
+    source: str  # text | photo
+    date: date | None
+    items: list[RecognizedItem]

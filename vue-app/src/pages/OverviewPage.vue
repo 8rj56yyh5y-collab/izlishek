@@ -54,7 +54,7 @@ function exportXlsx() {
       </div>
       <q-space />
       <q-btn outline no-caps color="primary" icon="download" label="Excel" @click="exportXlsx" />
-      <q-btn unelevated no-caps color="primary" icon="add" label="Відвантаження" @click="openShipment(null)" />
+      <q-btn unelevated no-caps color="primary" icon="compare_arrows" label="Нова звірка" to="/reconcile" />
     </div>
 
     <PeriodFilter v-model="period" class="q-mb-md" />
