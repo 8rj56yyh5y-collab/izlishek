@@ -105,7 +105,7 @@ function fillAll() {
     </div>
 
     <div class="totals q-mt-md">
-      <div><div class="mg-sub">{{ t('common.receiver') }}</div><div class="num big">{{ devKg(totals.point).replace('+', '') }} {{ t('common.kg') }}</div></div>
+      <div><div class="mg-sub">{{ t('lines.byBook') }}</div><div class="num big">{{ devKg(totals.point).replace('+', '') }} {{ t('common.kg') }}</div></div>
       <div><div class="mg-sub">{{ t('common.warehouse') }}</div><div class="num big">{{ devKg(totals.wh).replace('+', '') }} {{ t('common.kg') }}</div></div>
       <div><div class="mg-sub">{{ t('lines.plus') }}</div><div class="num big dev-pos">{{ devKg(totals.surplus) }} {{ t('common.kg') }}</div></div>
       <div><div class="mg-sub">{{ t('lines.minus') }}</div><div class="num big dev-neg">{{ devKg(totals.shortage) }} {{ t('common.kg') }}</div></div>

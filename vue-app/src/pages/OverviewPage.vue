@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { lang, t } from '@/i18n'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { cleanParams, http, type Period, type ReceiverBalance, type Summary } from '@/api'
 import { devClass, devKg, devMoney, devPct, kg } from '@/format'
@@ -14,6 +14,10 @@ const period = ref<Period>({ date_from: null, date_to: null, point_id: null })
 const data = ref<Summary | null>(null)
 const loading = ref(false)
 const expanded = ref<string[]>([])
+// Точність приймальника — компактно, одним рядком під іменем.
+const accBy = computed(() => new Map((data.value?.accuracy ?? []).map((a) => [a.receiver_name, a])))
+const trendIcon = { better: 'trending_down', worse: 'trending_up', same: 'trending_flat' } as const
+const fmtPct = (v: number | null) => (v === null ? '—' : v.toLocaleString('uk-UA', { maximumFractionDigits: 1 }))
 
 const shipOpen = ref(false)
 const shipId = ref<number | null>(null)
@@ -113,6 +117,15 @@ function exportXlsx() {
                   <span class="dev-pos">{{ devKg(r.surplus_kg) }}</span> /
                   <span class="dev-neg">{{ devKg(r.shortage_kg) }}</span> {{ t('common.kg') }}
                 </div>
+                <div v-if="accBy.get(r.receiver_name)?.abs_pct != null" class="acc mg-sub">
+                  <span>{{ t('ov.acc', { pct: fmtPct(accBy.get(r.receiver_name)!.abs_pct) }) }}</span>
+                  <span v-if="accBy.get(r.receiver_name)!.trend" class="trend" :class="accBy.get(r.receiver_name)!.trend!">
+                    <q-icon :name="trendIcon[accBy.get(r.receiver_name)!.trend!]" size="15px" />
+                    {{ t(`ov.${accBy.get(r.receiver_name)!.trend!}`) }}
+                    <q-tooltip>{{ t('ov.accTip', { r: fmtPct(accBy.get(r.receiver_name)!.recent_pct), p: fmtPct(accBy.get(r.receiver_name)!.prev_pct) }) }}</q-tooltip>
+                  </span>
+                  <span v-if="accBy.get(r.receiver_name)!.worst_material" class="gt-xs">· {{ t('ov.mostlyIn', { m: accBy.get(r.receiver_name)!.worst_material! }) }}</span>
+                </div>
               </div>
               <div class="r">
                 <div class="num text-weight-bold" :class="devClass(r.balance_amount)">{{ devMoney(r.balance_amount) }}</div>
@@ -193,6 +206,11 @@ function exportXlsx() {
 .rcv-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; }
 .rcv-row:hover { background: var(--mg-bg-2); }
 .rcv-name { flex: 1; min-width: 0; }
+.acc { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; }
+.trend { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; padding: 0 6px; border-radius: 999px; }
+.trend.better { color: var(--mg-positive); background: var(--mg-positive-soft); }
+.trend.worse { color: var(--mg-negative); background: var(--mg-negative-soft); }
+.trend.same { color: var(--mg-fg-2); background: var(--mg-bg-2); }
 .rcv-detail { padding: 0 16px 12px 42px; }
 .r { text-align: right; }
 .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }

@@ -49,6 +49,11 @@ class MaterialIn(BaseModel):
     is_active: bool = True
 
 
+class LearnIn(BaseModel):
+    material_id: int
+    alias: str = Field(min_length=1, max_length=80)
+
+
 class MaterialOut(_Orm):
     id: int
     name: str
@@ -199,10 +204,23 @@ class TimelinePoint(BaseModel):
     deviation_amount: float
 
 
+class ReceiverAccuracy(BaseModel):
+    """Наскільки точно приймальник ставить засор: середнє |відхилення| від ваги за обліком."""
+    receiver_name: str
+    count: int                 # звірок за період
+    abs_pct: float | None      # Σ|відхилень| / Σ ваги за обліком, % — за період
+    net_kg: float              # куди «тягне»: + у плюс, − у мінус
+    trend: str | None          # better | worse | same | None (мало даних)
+    recent_pct: float | None   # останні 3 звірки
+    prev_pct: float | None     # 3 перед ними
+    worst_material: str | None # де найбільше розходиться (кг за модулем) за період
+
+
 class Summary(BaseModel):
     shipments: int
     totals: Totals
     receivers: list[ReceiverBalance]
+    accuracy: list[ReceiverAccuracy] = []
     materials: list[MaterialStat]
     timeline: list[TimelinePoint]
 

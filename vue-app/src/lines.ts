@@ -32,7 +32,7 @@ export function mergeRecognized(rows: Row[], items: RecognizedItem[], column: Co
       ? rows.find((r) => r.material_id === it.material_id)
       : rows.find((r) => !r.material_id && norm(r.raw) === norm(it.raw))
     if (!row) {
-      row = { material_id: it.material_id, point_kg: '', warehouse_kg: '', price_per_kg: null, raw: it.raw }
+      row = { material_id: it.material_id, point_kg: '', warehouse_kg: '', price_per_kg: null, raw: it.material_id ? null : it.raw }
       rows.push(row)
     }
     row[key(column)] = fmt(it.kg)

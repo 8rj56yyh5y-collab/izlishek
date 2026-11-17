@@ -100,17 +100,26 @@ function reset() {
   active.value = 0
 }
 
+// Користувач сам вибрав матеріал для невпізнаного написання — запамʼятовуємо, щоб наступного разу впізнавалось.
+async function learnAliases(rs: Row[]) {
+  const items = rs.filter((r) => r.raw && r.material_id).map((r) => ({ material_id: r.material_id, alias: r.raw }))
+  if (!items.length) return 0
+  try { await http.post('/materials/learn', items) } catch { /* не критично */ }
+  return items.length
+}
+
 async function save() {
   const res = linesPayload(rows.value)
   if (!form.value.point_id) return $q.notify({ type: 'warning', message: t('lines.errPoint') })
   if (res.error) return $q.notify({ type: 'warning', message: res.error })
   saving.value = true
   try {
+    const learned = await learnAliases(rows.value)
     if (pendingId.value) await http.put(`/shipments/${pendingId.value}`, { ...form.value, lines: res.lines })
     else await http.post('/shipments', { ...form.value, lines: res.lines })
     loadPending()
     $q.notify({
-      type: 'positive', message: t('rec.savedOk'),
+      type: 'positive', message: t('rec.savedOk'), caption: learned ? t('rec.learned', { n: learned }) : undefined,
       actions: [{ label: t('rec.toOverview'), color: 'white', handler: () => router.push('/') }],
     })
     reset()

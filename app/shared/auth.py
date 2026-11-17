@@ -39,6 +39,7 @@ RECEIVER_ALLOWED = (
     ("*", "/api/v1/receiver/"),
     ("GET", "/api/v1/surplus/materials"),
     ("POST", "/api/v1/surplus/recognize"),
+    ("GET", "/api/v1/surplus/recognize/status"),
 )
 _SECRET = (os.getenv("SECRET_KEY") or secrets.token_hex(32)).encode()
 

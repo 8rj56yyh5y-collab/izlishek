@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import base64
+import difflib
 import json
 import logging
 import os
@@ -76,6 +77,23 @@ class Matcher:
                     return mid, len(alias), n.find(alias)
             elif alias in n:
                 return mid, len(alias), n.find(alias)
+        return self._fuzzy(n)
+
+    def _fuzzy(self, n: str) -> tuple[int, int, int] | None:
+        """Скорочення й описки: «акб ч» → «акб чер», «латун» → «латунь», «алюминь» → «алюминий».
+        Лише коли варіант однозначний — інакше краще жовтий рядок, ніж тихо не той метал."""
+        if len(n) >= 3:
+            hits = {mid for alias, mid in self.entries if alias.startswith(n)}
+            if len(hits) == 1:
+                return hits.pop(), len(n) - 1, 0
+            if len(hits) > 1:
+                return None  # «стружка» — і АЛ, і мідна, і латунна: не вгадуємо
+        aliases = [a for a, _ in self.entries if len(a) >= 4]
+        close = difflib.get_close_matches(n, aliases, n=2, cutoff=0.82)
+        if close:
+            mids = {mid for alias, mid in self.entries if alias in close}
+            if len(mids) == 1:
+                return mids.pop(), len(close[0]) - 2, 0
         return None
 
     def match(self, raw: str) -> int | None:
@@ -226,35 +244,52 @@ def _schema(material_names: list[str]) -> dict:
     }
 
 
-_PROMPT = """На фото — облік брухту кольорових металів: рукописний зошит, скрін програми, \
-повідомлення або накладна. Випиши кожен рядок «матеріал — вага в кг».
+_PROMPT = """Ти допомагаєш звіряти облік брухту кольорових металів. На зображенні(ях) — одне з:
+скрін облікової системи (залишки по позиціях), відомість/накладна складу кольорового металу,
+рукописний зошит чи повідомлення приймальника. Пишуть як завгодно: скорочення, помилки, суміш
+укр/рос/латиниці («AL», «ал», «алюм», «Cu», «Са», «мед», «лат», «нерж», «акб ч», «банка»).
+
+Випиши кожну позицію «матеріал — вага в кг».
 
 Правила:
-- raw: назва так, як написано (AL, Cu/Са, латунь, AL банка, AL (посуда, профіль), титан, нерж, ЦАМ тощо).
-- material: найближчий матеріал із довідника нижче; якщо не впевнений — порожній рядок.
-  «AL банка», «AL посуда/профіль» — окремі матеріали, не плутай зі звичайним AL.
-- kg: перша вага в рядку. Кома — десятковий роздільник (71,9 = 71.9).
-- kg2: якщо в рядку є ДРУГА колонка ваги (напр. дві колонки «Я | ДМС»), то друга вага; інакше null.
-- Підсумкові рядки («разом», «всього») не виписуй. Нічого не вигадуй: нерозбірливе — пропусти.
+- raw: назва так, як написано.
+- material: відповідна позиція з довідника нижче (там же — як її скорочують). Якщо не впевнений — "".
+  Різні сорти — різні позиції: «АЛ профиль», «АЛ электротех», «Банка» ≠ просто «Алюминий»;
+  «Медь 1 сорт» ≠ «Медь микс»; стружка — окрема позиція.
+- kg: вага в кг. Кома — десятковий роздільник (71,9 = 71.9). Якщо вказано в тоннах — переведи в кг.
+  Якщо є колонки «брутто / засор (засміченість) / нетто» — бери НЕТТО (після засору).
+- kg2: лише коли в рядку ДВІ порівнювані ваги (напр. дві колонки «Я | ДМС», «облік | склад») — друга; інакше null.
+- Не виписуй підсумки («разом», «всього», «итого»), ціни, суми в грн, номери машин.
+- Нічого не вигадуй: нерозбірливе пропусти.
 - date: дата на документі, якщо видно.
 
-Довідник матеріалів: {names}"""
+Довідник (назва: як пишуть):
+{names}"""
+
+
+async def ensure_photo_configured() -> None:
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(503, L("Розпізнавання фото й PDF не налаштоване: на сервері не задано ANTHROPIC_API_KEY. "
+                                   "Поки що — текстом, файлом Excel/CSV або зі списку.",
+                                   "Распознавание фото и PDF не настроено: на сервере не задан ANTHROPIC_API_KEY. "
+                                   "Пока — текстом, файлом Excel/CSV или из списка."))
 
 
 async def parse_images(images: list[tuple[bytes, str]], materials: list[SurplusMaterial], matcher: Matcher) -> tuple[date | None, list[Item]]:
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        raise HTTPException(503, L("Розпізнавання фото не налаштоване (немає ANTHROPIC_API_KEY). Вставте текстом.", "Распознавание фото не настроено (нет ANTHROPIC_API_KEY). Вставьте текстом."))
+    await ensure_photo_configured()
     import anthropic  # лінивий імпорт: без ключа модуль не потрібен
 
-    names = [m.name for m in materials if m.is_active]
+    active = [m for m in materials if m.is_active]
+    names = [m.name for m in active]
+    directory = "\n".join(f"- {m.name}: {m.aliases}" if m.aliases else f"- {m.name}" for m in active)
     content: list[dict] = []
     for data, media_type in images:
         kind = "document" if media_type == "application/pdf" else "image"
         content.append({"type": kind, "source": {"type": "base64", "media_type": media_type,
                                                  "data": base64.standard_b64encode(data).decode()}})
-    content.append({"type": "text", "text": _PROMPT.format(names=", ".join(names))})
+    content.append({"type": "text", "text": _PROMPT.format(names=directory)})
 
-    client = anthropic.AsyncAnthropic()
+    client = anthropic.AsyncAnthropic(timeout=90, max_retries=2)
     try:
         resp = await client.beta.messages.create(
             model=MODEL,
@@ -265,10 +300,31 @@ async def parse_images(images: list[tuple[bytes, str]], materials: list[SurplusM
             messages=[{"role": "user", "content": content}],
         )
     except anthropic.RateLimitError:
-        raise HTTPException(429, L("Забагато запитів на розпізнавання — спробуйте за хвилину", "Слишком много запросов на распознавание — попробуйте через минуту")) from None
+        raise HTTPException(429, L("Забагато запитів на розпізнавання — спробуйте за хвилину",
+                                   "Слишком много запросов на распознавание — попробуйте через минуту")) from None
+    except anthropic.AuthenticationError:
+        log.error("ANTHROPIC_API_KEY відхилено")
+        raise HTTPException(502, L("Ключ ANTHROPIC_API_KEY на сервері невірний або відкликаний.",
+                                   "Ключ ANTHROPIC_API_KEY на сервере неверный или отозван.")) from None
+    except anthropic.PermissionDeniedError as e:
+        log.error("claude 403: %s", e.message)
+        raise HTTPException(502, L("Ключ ANTHROPIC_API_KEY не має доступу або закінчився баланс в Anthropic Console.",
+                                   "У ключа ANTHROPIC_API_KEY нет доступа или закончился баланс в Anthropic Console.")) from None
+    except anthropic.BadRequestError as e:
+        log.warning("claude 400: %s", e.message)
+        msg = e.message.lower()
+        if "credit" in msg or "billing" in msg or "balance" in msg:
+            raise HTTPException(502, L("В акаунті Anthropic закінчився баланс — поповніть у Console.",
+                                       "В аккаунте Anthropic закончился баланс — пополните в Console.")) from None
+        raise HTTPException(422, L("Сервіс розпізнавання не прийняв файл (можливо, завеликий PDF або пошкоджене фото).",
+                                   "Сервис распознавания не принял файл (возможно, слишком большой PDF или повреждённое фото).")) from None
     except anthropic.APIStatusError as e:
         log.warning("claude error %s: %s", e.status_code, e.message)
-        raise HTTPException(502, L("Сервіс розпізнавання повернув помилку. Спробуйте ще раз або вставте текстом.", "Сервис распознавания вернул ошибку. Попробуйте ещё раз или вставьте текстом.")) from None
+        raise HTTPException(502, L(f"Сервіс розпізнавання тимчасово недоступний ({e.status_code}). Спробуйте ще раз.",
+                                   f"Сервис распознавания временно недоступен ({e.status_code}). Попробуйте ещё раз.")) from None
+    except anthropic.APITimeoutError:
+        raise HTTPException(504, L("Розпізнавання задовго. Спробуйте одне фото за раз.",
+                                   "Распознавание слишком долгое. Попробуйте одно фото за раз.")) from None
     except anthropic.APIConnectionError:
         raise HTTPException(502, L("Немає зʼєднання із сервісом розпізнавання", "Нет соединения с сервисом распознавания")) from None
 

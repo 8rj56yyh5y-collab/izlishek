@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.modules.surplus import models  # noqa: F401 — реєстрація таблиць
 from app.modules.surplus.receiver_router import router as receiver_router
 from app.modules.surplus.router import router as surplus_router
-from app.modules.surplus.seed import seed
+from app.modules.surplus.seed import seed, sync_default_aliases
 from app.shared.auth import AuthMiddleware
 from app.shared.auth import router as auth_router
 from app.shared.config import get_settings
@@ -28,6 +28,7 @@ async def lifespan(_: FastAPI):
         await conn.run_sync(add_missing_columns)
     async for db in get_session():
         await seed(db, demo=get_settings().seed_demo)
+        await sync_default_aliases(db)
     yield
 
 

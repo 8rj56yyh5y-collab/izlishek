@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 
 from app.modules.surplus import schemas as s
 from app.modules.surplus import service
+from app.modules.surplus import images
 from app.modules.surplus import recognize as rec
 from app.modules.surplus.export import build_xlsx
 from app.shared.database import SessionDep
@@ -63,6 +64,13 @@ async def materials(session: SessionDep):
 @router.post("/materials", response_model=s.MaterialOut, status_code=201)
 async def create_material(data: s.MaterialIn, session: SessionDep):
     return await service.save_material(session, data)
+
+
+@router.post("/materials/learn", response_model=list[s.MaterialOut])
+async def learn_aliases(data: list[s.LearnIn], session: SessionDep):
+    """Запамʼятати, як пишуть матеріал: користувач вибрав позицію для невпізнаного «raw» —
+    наступного разу таке саме написання впізнається саме."""
+    return await service.learn_aliases(session, data)
 
 
 @router.put("/materials/{material_id}", response_model=s.MaterialOut)
@@ -152,24 +160,30 @@ async def export_xlsx(
     )
 
 
-_MAX_FILE = 10 * 1024 * 1024
-_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_MAX_FILE = 20 * 1024 * 1024
 
 
-def _kind(f: UploadFile) -> str:
+def _kind(f: UploadFile, data: bytes) -> str:
+    """Спершу — за вмістом (телефони часто шлють без розширення чи з «octet-stream»), потім за назвою."""
+    by_magic = images.sniff(data)
+    if by_magic:
+        return by_magic
     name = (f.filename or "").lower()
     mt = (f.content_type or "").lower()
-    if mt in _IMAGE_TYPES or name.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+    if mt.startswith("image/") or name.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif")):
         return "image"
-    if mt == "application/pdf" or name.endswith(".pdf"):
-        return "pdf"
-    if name.endswith((".xlsx", ".xlsm")) or "spreadsheetml" in mt:
-        return "xlsx"
-    if name.endswith(".csv") or mt == "text/csv":
+    if name.endswith(".csv") or mt in ("text/csv", "application/csv"):
         return "csv"
     if name.endswith((".txt", ".text")) or mt.startswith("text/"):
         return "txt"
-    return "?"
+    if "." in name.rsplit("/", 1)[-1]:
+        return "?"  # відоме розширення, яке не підтримуємо (.docx тощо)
+    # файл без розширення — спробуємо як текст, якщо декодується
+    try:
+        data[:4000].decode("utf-8")
+        return "txt"
+    except UnicodeDecodeError:
+        return "?"
 
 
 def _decode(data: bytes) -> str:
@@ -179,6 +193,13 @@ def _decode(data: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return data.decode("utf-8", errors="ignore")
+
+
+@router.get("/recognize/status")
+async def recognize_status():
+    """Чи налаштовано розпізнавання фото/PDF — щоб інтерфейс попередив заздалегідь, а не помилкою."""
+    import os
+    return {"photo": bool(os.getenv("ANTHROPIC_API_KEY"))}
 
 
 @router.post("/recognize", response_model=s.RecognizeOut)
@@ -200,10 +221,16 @@ async def recognize(
         for f in files:
             data = await f.read()
             if len(data) > _MAX_FILE:
-                raise HTTPException(413, L("Файл завеликий (макс. 10 МБ)", "Файл слишком большой (макс. 10 МБ)"))
-            kind = _kind(f)
+                raise HTTPException(413, L("Файл завеликий (макс. 20 МБ)", "Файл слишком большой (макс. 20 МБ)"))
+            kind = _kind(f, data)
+            if kind in ("image", "pdf"):
+                await rec.ensure_photo_configured()
             if kind == "image":
-                to_claude.append((data, f.content_type if f.content_type in _IMAGE_TYPES else "image/jpeg"))
+                try:
+                    to_claude.append((images.to_jpeg(data), "image/jpeg"))
+                except ValueError:
+                    raise HTTPException(422, L(f"Не вдалося відкрити зображення «{f.filename}»",
+                                               f"Не удалось открыть изображение «{f.filename}»")) from None
             elif kind == "pdf":
                 to_claude.append((data, "application/pdf"))
             elif kind == "xlsx":
@@ -216,6 +243,14 @@ async def recognize(
                     raise HTTPException(422, L("Не вдалося відкрити Excel-файл", "Не удалось открыть Excel-файл")) from None
                 for ws in wb.worksheets:
                     items += rec.parse_table([list(r) for r in ws.iter_rows(values_only=True)], matcher)
+            elif kind == "xls":
+                import xlrd
+                try:
+                    book = xlrd.open_workbook(file_contents=data)
+                except Exception:
+                    raise HTTPException(422, L("Не вдалося відкрити Excel-файл", "Не удалось открыть Excel-файл")) from None
+                for sh in book.sheets():
+                    items += rec.parse_table([sh.row_values(i) for i in range(sh.nrows)], matcher)
             elif kind == "csv":
                 import csv
                 raw = _decode(data)
@@ -226,8 +261,8 @@ async def recognize(
                 found_date = found_date or d
                 items += its
             else:
-                raise HTTPException(415, L("Підтримуються фото, PDF, Excel (.xlsx), CSV і TXT",
-                                           "Поддерживаются фото, PDF, Excel (.xlsx), CSV и TXT"))
+                raise HTTPException(415, L(f"Файл «{f.filename}» не підтримується. Можна: фото, PDF, Excel, CSV, TXT",
+                                           f"Файл «{f.filename}» не поддерживается. Можно: фото, PDF, Excel, CSV, TXT"))
         if to_claude:
             d, its = await rec.parse_images(to_claude, materials, matcher)
             found_date = found_date or d

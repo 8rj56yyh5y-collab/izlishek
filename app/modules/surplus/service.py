@@ -119,6 +119,21 @@ async def save_material(db: AsyncSession, data: s.MaterialIn, material_id: int |
     return obj
 
 
+async def learn_aliases(db: AsyncSession, data: list[s.LearnIn]) -> list[SurplusMaterial]:
+    changed: dict[int, SurplusMaterial] = {}
+    for item in data:
+        alias = " ".join(item.alias.lower().replace(",", " ").split())
+        if len(alias) < 2:
+            continue
+        mat = changed.get(item.material_id) or await _get(db, SurplusMaterial, item.material_id, ("Матеріал", "Материал"))
+        have = [a.strip().lower() for a in (mat.aliases or "").split(",") if a.strip()]
+        if alias not in have and alias != mat.name.lower():
+            mat.aliases = ", ".join([*have, alias])
+            changed[mat.id] = mat
+    await db.commit()
+    return list(changed.values())
+
+
 async def _get(db: AsyncSession, model, obj_id: int, label: tuple[str, str]):
     obj = await db.get(model, obj_id)
     if obj is None:
@@ -410,7 +425,53 @@ async def summary(
         receivers=receivers,
         materials=materials,
         timeline=timeline,
+        accuracy=await receiver_accuracy(db, shipments, date_to),
     )
+
+
+def _abs_pct(ships: list[SurplusShipment]) -> float | None:
+    base = sum((ln.point_kg for sh in ships for ln in sh.lines), ZERO)
+    if not base:
+        return None
+    off = sum((abs(ln.warehouse_kg - ln.point_kg) for sh in ships for ln in sh.lines), ZERO)
+    return _f(off / base * 100, "0.01")
+
+
+async def receiver_accuracy(db: AsyncSession, period: list[SurplusShipment], date_to: date | None) -> list[s.ReceiverAccuracy]:
+    """Точність по приймальниках за період + тренд: останні 3 звірки проти 3 попередніх
+    (незалежно від фільтра — щоб «краще/гірше» було видно навіть за короткий період)."""
+    history = sorted(await list_shipments(db, date_to=date_to), key=lambda x: (x.ship_date, x.id))
+    by_r: dict[str, list[SurplusShipment]] = defaultdict(list)
+    for sh in period:
+        by_r[sh.receiver_name].append(sh)
+    out: list[s.ReceiverAccuracy] = []
+    for name, ships in by_r.items():
+        hist = [x for x in history if x.receiver_name == name]
+        recent, prev = hist[-3:], hist[-6:-3]
+        r_pct, p_pct = _abs_pct(recent), _abs_pct(prev) if len(prev) >= 2 else None
+        trend = None
+        if r_pct is not None and p_pct is not None:
+            if r_pct < p_pct * 0.85 - 0.05:
+                trend = "better"
+            elif r_pct > p_pct * 1.15 + 0.05:
+                trend = "worse"
+            else:
+                trend = "same"
+        per_mat: dict[str, Decimal] = defaultdict(Decimal)
+        net = ZERO
+        for sh in ships:
+            for ln in sh.lines:
+                d = ln.warehouse_kg - ln.point_kg
+                per_mat[ln.material.name] += abs(d)
+                net += d
+        worst = max(per_mat.items(), key=lambda kv: kv[1]) if per_mat else None
+        out.append(s.ReceiverAccuracy(
+            receiver_name=name, count=len(ships), abs_pct=_abs_pct(ships), net_kg=_f(net),
+            trend=trend, recent_pct=r_pct, prev_pct=p_pct,
+            worst_material=worst[0] if worst and worst[1] > 0 else None,
+        ))
+    out.sort(key=lambda a: -(a.abs_pct or 0))
+    return out
 
 
 async def receiver_ledger(db: AsyncSession, receiver: str) -> list[s.LedgerRow]:

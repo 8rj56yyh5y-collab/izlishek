@@ -5,6 +5,9 @@ aiosqlite>=0.20
 asyncpg>=0.29
 openpyxl>=3.1
 python-multipart>=0.0.9
+pillow>=11
+pillow-heif>=0.18
+xlrd>=2.0
 anthropic>=2.9
 # тести
 pytest>=8

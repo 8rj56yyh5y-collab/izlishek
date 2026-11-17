@@ -20,6 +20,15 @@ const fileNames = ref<string[]>([])
 const search = ref('')
 const listKg = ref<Record<number, string>>({})
 
+// Чи налаштоване розпізнавання фото/PDF на сервері — питаємо один раз на всю сторінку.
+const photoReady = ref(true)
+const w = window as unknown as { __btPhoto?: Promise<boolean> }
+function photoStatus(): Promise<boolean> {
+  w.__btPhoto ??= http.get<{ photo: boolean }>('/recognize/status').then((r) => r.data.photo).catch(() => true)
+  return w.__btPhoto
+}
+onMounted(async () => { photoReady.value = await photoStatus() })
+
 const modes = computed(() => [
   { v: 'photo' as Mode, icon: 'photo_camera', label: t('rec.photo') },
   { v: 'file' as Mode, icon: 'upload_file', label: t('rec.file') },
@@ -117,6 +126,9 @@ defineExpose({ reset })
       </button>
     </div>
 
+    <div v-if="!photoReady && (mode === 'photo' || mode === 'file')" class="notice">
+      <q-icon name="info" size="18px" /> <span>{{ t('rec.noPhoto') }}</span>
+    </div>
     <label v-if="mode === 'photo' || mode === 'file'" class="drop">
       <input v-if="mode === 'photo'" type="file" accept="image/*" multiple hidden @change="onFiles" />
       <input v-else type="file" multiple hidden
@@ -160,6 +172,8 @@ defineExpose({ reset })
 </template>
 
 <style scoped>
+.notice { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; margin-bottom: 8px; border-radius: var(--mg-radius-md);
+  background: var(--mg-warning-soft); color: var(--mg-warning); font-size: 13px; }
 .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; margin-bottom: 10px;
   border-radius: 12px; background: var(--mg-bg-2); border: 1px solid var(--mg-border); }
 .modes button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border: 0; border-radius: 9px;

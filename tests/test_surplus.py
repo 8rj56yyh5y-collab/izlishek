@@ -281,3 +281,39 @@ async def test_recognize_files(client):
     assert [(i["material_name"], i["kg"]) for i in r.json()["items"]] == [("Банка", 12.0), ("ЦАМ", 1.4)]
     r = await client.post("/api/v1/surplus/recognize", files={"files": ("a.docx", b"x", "application/msword")})
     assert r.status_code == 415
+
+
+def test_fuzzy_abbreviations():
+    m, names = _matcher()
+    assert names[m.match("акб ч")] == "АКБ чер"
+    assert names[m.match("латун")] == "Латунь/Бронза"
+    assert names[m.match("алюминь")] == "Алюминий"
+    assert names[m.match("Медная стружк")] == "Медная стружка"
+    assert m.match("ак") is None          # закоротко — не вгадуємо
+    assert names[m.match("мед 1с")] == "Медь 1 сорт"
+    assert names[m.match("эл тех")] == "АЛ электротех"
+    assert names[m.match("лат стр")] == "Латунь/Бронза стружка"
+    assert m.match("стружка") is None     # неоднозначно (АЛ/мідна/латунна/Н/Ж) — краще жовтий рядок
+
+
+async def test_learn_alias(client):
+    mats = (await client.get("/api/v1/surplus/materials")).json()
+    al = next(x for x in mats if x["name"] == "АЛ электротех")
+    r = await client.post("/api/v1/surplus/recognize", data={"text": "Шмурдяк 5"})
+    assert r.json()["items"][0]["material_id"] is None
+    await client.post("/api/v1/surplus/materials/learn", json=[{"material_id": al["id"], "alias": "Шмурдяк"}])
+    r = await client.post("/api/v1/surplus/recognize", data={"text": "шмурдяк 7"})
+    assert r.json()["items"][0]["material_name"] == "АЛ электротех"
+
+
+async def test_accuracy_trend(client):
+    p = (await client.get("/api/v1/surplus/points")).json()[0]
+    al = next(x for x in (await client.get("/api/v1/surplus/materials")).json() if x["name"] == "Алюминий")
+    # 3 неточні звірки (−10%), потім 3 точні (−1%) → «краще»
+    for day, wh in [(1, 90), (2, 90), (3, 90), (4, 99), (5, 99), (6, 99)]:
+        await client.post("/api/v1/surplus/shipments", json={"ship_date": f"2026-11-0{day}", "point_id": p["id"],
+            "lines": [{"material_id": al["id"], "point_kg": "100", "warehouse_kg": str(wh)}]})
+    acc = (await client.get("/api/v1/surplus/summary")).json()["accuracy"][0]
+    assert acc["count"] == 6 and acc["trend"] == "better"
+    assert acc["recent_pct"] == 1.0 and acc["prev_pct"] == 10.0 and acc["abs_pct"] == 5.5
+    assert acc["net_kg"] == -33.0 and acc["worst_material"] == "Алюминий"

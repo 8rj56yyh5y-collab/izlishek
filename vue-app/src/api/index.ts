@@ -49,9 +49,13 @@ export interface TimelinePoint {
   shipment_id: number; ship_date: string; point_name: string; receiver_name: string
   deviation_kg: number; deviation_amount: number
 }
+export interface ReceiverAccuracy {
+  receiver_name: string; count: number; abs_pct: number | null; net_kg: number
+  trend: 'better' | 'worse' | 'same' | null; recent_pct: number | null; prev_pct: number | null; worst_material: string | null
+}
 export interface Summary {
   shipments: number; totals: Totals; receivers: ReceiverBalance[]
-  materials: MaterialStat[]; timeline: TimelinePoint[]
+  materials: MaterialStat[]; timeline: TimelinePoint[]; accuracy: ReceiverAccuracy[]
 }
 export interface LedgerRow {
   kind: 'shipment' | 'settlement'; ref_id: number; on_date: string; title: string
@@ -72,9 +76,14 @@ export function cleanParams(p: Period): Record<string, string | number> {
 }
 
 export function apiError(e: unknown): string {
-  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+  const d = r?.data?.detail
   if (typeof d === 'string') return d
   if (Array.isArray(d)) return d.map((x: { msg?: string }) => x.msg ?? '').join('; ')
+  // відповіді без JSON: обрив звʼязку, ліміт розміру проксі, «сплячий» сервер
+  if (!r) return t('common.netError')
+  if (r.status === 413) return t('common.tooBig')
+  if (r.status && r.status >= 500) return t('common.serverDown', { code: r.status })
   return t('common.error')
 }
 
