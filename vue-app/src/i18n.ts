@@ -65,6 +65,9 @@ const uk = {
   'dir.pinSave': 'Задати',
   'dir.pinRemove': 'Прибрати PIN',
   'dir.pinBad': 'PIN — від 4 до 8 цифр',
+  'dir.quotes': 'Цитати на екрані входу',
+  'dir.quotesSub': 'По одній у рядку: «Текст — Автор». Якщо поле порожнє — показується вбудований набір.',
+  'dir.quotesPh': 'Хто всюди — той ніде. — Сенека',
 
   'common.date': 'Дата',
   'common.point': 'Пункт',
@@ -252,6 +255,9 @@ const ru: Record<Key, string> = {
   'dir.pinSave': 'Задать',
   'dir.pinRemove': 'Убрать PIN',
   'dir.pinBad': 'PIN — от 4 до 8 цифр',
+  'dir.quotes': 'Цитаты на экране входа',
+  'dir.quotesSub': 'По одной в строке: «Текст — Автор». Если поле пустое — показывается встроенный набор.',
+  'dir.quotesPh': 'Кто везде — тот нигде. — Сенека',
 
   'common.date': 'Дата',
   'common.point': 'Пункт',

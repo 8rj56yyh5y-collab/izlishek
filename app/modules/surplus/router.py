@@ -37,12 +37,15 @@ async def set_pin(point_id: int, data: s.PinIn, session: SessionDep):
 
 @router.get("/settings", response_model=s.SettingsIO)
 async def get_app_settings(session: SessionDep):
-    return s.SettingsIO(receiver_mode=await service.receiver_mode(session))
+    m = await service.get_settings_map(session)
+    return s.SettingsIO(receiver_mode=m.get("receiver_mode") == "1", quotes=m.get("quotes") or "")
 
 
 @router.put("/settings", response_model=s.SettingsIO)
 async def put_app_settings(data: s.SettingsIO, session: SessionDep):
     await service.set_setting(session, "receiver_mode", "1" if data.receiver_mode else "0")
+    if data.quotes is not None:
+        await service.set_setting(session, "quotes", data.quotes.strip())
     return data
 
 

@@ -33,7 +33,7 @@ from app.shared.i18n import L
 
 COOKIE = "bt_session"
 MAX_AGE = 60 * 24 * 3600
-OPEN_PATHS = {"/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/status", "/api/v1/auth/logout"}
+OPEN_PATHS = {"/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/status", "/api/v1/auth/logout", "/api/v1/auth/quotes"}
 # Що дозволено приймальнику (метод, префікс шляху).
 RECEIVER_ALLOWED = (
     ("*", "/api/v1/receiver/"),
@@ -163,6 +163,15 @@ async def status(request: Request):
             p = await db.get(SurplusPoint, who.point_id)
             out.update(point_id=p.id, point_name=p.name, receiver_name=p.receiver_name)
     return out
+
+
+@router.get("/quotes")
+async def quotes():
+    """Свої цитати для екрана входу (до входу, тож без авторизації — там лише текст цитат)."""
+    from app.modules.surplus import service
+
+    async for db in get_session():
+        return service.parse_quotes((await service.get_settings_map(db)).get("quotes"))
 
 
 @router.post("/login")

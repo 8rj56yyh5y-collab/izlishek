@@ -233,3 +233,11 @@ async def test_receiver_mode_flow(client, monkeypatch):
         # вимкнули режим — сесія приймальника більше не діє
         await client.put("/api/v1/surplus/settings", json={"receiver_mode": False})
         assert (await rc.get("/api/v1/receiver/me")).status_code == 401
+
+
+async def test_custom_quotes(client):
+    assert (await client.get("/api/v1/auth/quotes")).json() == []
+    await client.put("/api/v1/surplus/settings", json={"receiver_mode": False,
+        "quotes": "Хто всюди — той ніде. — Сенека\n\n«Без автора»"})
+    assert (await client.get("/api/v1/auth/quotes")).json() == [
+        {"text": "Хто всюди — той ніде.", "author": "Сенека"}, {"text": "Без автора", "author": ""}]

@@ -496,6 +496,22 @@ async def set_setting(db: AsyncSession, key: str, value: str) -> None:
     await db.commit()
 
 
+def parse_quotes(raw: str | None) -> list[dict[str, str]]:
+    """«Текст — Автор» по рядку; автор необовʼязковий (роздільник — тире з пробілами)."""
+    out = []
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        text, author = line, ""
+        for sep in (" — ", " – ", " - "):
+            if sep in line:
+                text, _, author = line.rpartition(sep)
+                break
+        out.append({"text": text.strip().strip("«»\"„“"), "author": author.strip()})
+    return out
+
+
 async def receiver_mode(db: AsyncSession) -> bool:
     return (await get_settings_map(db)).get("receiver_mode") == "1"
 

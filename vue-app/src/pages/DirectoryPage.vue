@@ -13,21 +13,28 @@ const materials = ref<Material[]>([])
 const receiverMode = ref(false)
 const passwordOn = ref(true)
 const pins = ref<Record<number, string>>({})
+const quotes = ref('')
 
 async function load() {
   const [p, m, s, st] = await Promise.all([
     http.get<Point[]>('/points'), http.get<Material[]>('/materials'),
-    http.get<{ receiver_mode: boolean }>('/settings'), axios.get<{ required: boolean }>('/api/v1/auth/status'),
+    http.get<{ receiver_mode: boolean; quotes: string }>('/settings'), axios.get<{ required: boolean }>('/api/v1/auth/status'),
   ])
   points.value = p.data
   materials.value = m.data
   receiverMode.value = s.data.receiver_mode
+  quotes.value = s.data.quotes ?? ''
   passwordOn.value = st.data.required
 }
 
 async function setReceiverMode(v: boolean) {
   receiverMode.value = v
   await http.put('/settings', { receiver_mode: v })
+  $q.notify({ type: 'positive', message: t('common.saved'), timeout: 900 })
+}
+
+async function saveQuotes() {
+  await http.put('/settings', { receiver_mode: receiverMode.value, quotes: quotes.value })
   $q.notify({ type: 'positive', message: t('common.saved'), timeout: 900 })
 }
 
@@ -131,6 +138,18 @@ function addMat() {
             </q-btn>
           </div>
         </template>
+      </div>
+
+      <div class="mg-card">
+        <div class="card-h">
+          <div class="text-weight-medium">{{ t('dir.quotes') }}</div>
+          <div class="mg-sub">{{ t('dir.quotesSub') }}</div>
+        </div>
+        <div class="q-pa-md">
+          <q-input v-model="quotes" type="textarea" outlined dense autogrow input-style="min-height: 120px"
+            :placeholder="t('dir.quotesPh')" />
+          <q-btn unelevated no-caps color="primary" :label="t('common.save')" class="q-mt-sm" @click="saveQuotes" />
+        </div>
       </div>
       </div>
 

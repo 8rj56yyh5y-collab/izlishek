@@ -36,6 +36,8 @@ class PinIn(BaseModel):
 
 class SettingsIO(BaseModel):
     receiver_mode: bool
+    # Свої цитати для екрана входу: по одній у рядку, «Текст — Автор». Порожньо — вбудований набір.
+    quotes: str | None = Field(default=None, max_length=20000)
 
 
 class MaterialIn(BaseModel):
