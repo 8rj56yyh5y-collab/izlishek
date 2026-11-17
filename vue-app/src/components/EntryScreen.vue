@@ -8,19 +8,22 @@ import BrandLogo from './BrandLogo.vue'
 const props = defineProps<{ needPassword: boolean; receiverMode?: boolean }>()
 const emit = defineEmits<{ done: [role: string] }>()
 
-// Коротко, по-людськи, без пафосу. Пара uk/ru з тим самим змістом.
-const PHRASES: [string, string][] = [
-  ['Кожен кілограм на своєму місці.', 'Каждый килограмм на своём месте.'],
-  ['Точна вага — спокійний вечір.', 'Точный вес — спокойный вечер.'],
-  ['Добре зважено — наполовину зроблено.', 'Хорошо взвешено — наполовину сделано.'],
-  ['Дрібниць не буває. Бувають кілограми.', 'Мелочей не бывает. Бывают килограммы.'],
-  ['Чесна вага — міцна команда.', 'Честный вес — крепкая команда.'],
-  ['Сьогодні буде добрий день.', 'Сегодня будет хороший день.'],
-  ['Порядок у цифрах — порядок у справах.', 'Порядок в цифрах — порядок в делах.'],
-  ['Метал любить точність. Ми теж.', 'Металл любит точность. Мы тоже.'],
+// Цитати з глибиною, але без пафосу. Лише ті, чиє авторство надійне (без «приписаних» Конфуцію тощо).
+// [uk, ru, автор uk, автор ru]
+const QUOTES: [string, string, string, string][] = [
+  ['Поки ми відкладаємо життя, воно минає.', 'Пока мы откладываем жизнь, она проходит.', 'Сенека', 'Сенека'],
+  ['Не речі турбують людей, а їхні думки про речі.', 'Не вещи тревожат людей, а их мнения о вещах.', 'Епіктет', 'Эпиктет'],
+  ['Не тому ми не наважуємось, що важко; важко тому, що не наважуємось.', 'Не потому, что трудно, мы не решаемся; потому трудно, что не решаемся.', 'Сенека', 'Сенека'],
+  ['Не можна двічі увійти в ту саму річку.', 'Нельзя дважды войти в одну и ту же реку.', 'Геракліт', 'Гераклит'],
+  ['Шлях у тисячу лі починається з першого кроку.', 'Путь в тысячу ли начинается с первого шага.', 'Лао-цзи', 'Лао-цзы'],
+  ['Світ ловив мене, та не спіймав.', 'Мир ловил меня, но не поймал.', 'Григорій Сковорода', 'Григорий Сковорода'],
+  ['Найголовнішого очима не побачиш.', 'Самого главного глазами не увидишь.', 'Антуан де Сент-Екзюпері', 'Антуан де Сент-Экзюпери'],
+  ['Стислість — сестра таланту.', 'Краткость — сестра таланта.', 'Антон Чехов', 'Антон Чехов'],
+  ['Я знаю, що нічого не знаю.', 'Я знаю, что ничего не знаю.', 'Сократ', 'Сократ'],
 ]
-const pick = Math.floor(Math.random() * PHRASES.length)
-const phrase = computed(() => PHRASES[pick][lang.value === 'ru' ? 1 : 0])
+const pick = Math.floor(Math.random() * QUOTES.length)
+const phrase = computed(() => QUOTES[pick][lang.value === 'ru' ? 1 : 0])
+const author = computed(() => QUOTES[pick][lang.value === 'ru' ? 3 : 2])
 
 const password = ref('')
 const error = ref('')
@@ -75,7 +78,10 @@ onBeforeUnmount(() => window.clearTimeout(timer))
         <div class="halo" />
         <BrandLogo large :size="200" class="logo" />
       </div>
-      <p class="phrase">{{ phrase }}</p>
+      <figure class="quote">
+        <blockquote class="phrase">{{ phrase }}</blockquote>
+        <figcaption class="author">{{ author }}</figcaption>
+      </figure>
 
       <form v-if="needPassword" class="login" :class="{ shake }" @submit.prevent="submit" @click.stop
         @animationend="shake = false">
@@ -147,8 +153,11 @@ onBeforeUnmount(() => window.clearTimeout(timer))
 }
 @keyframes halo { to { opacity: 0.55; transform: translate(-50%, -50%) scale(1.12); } }
 
+.quote { margin: 26px 0 0; }
+.author { margin-top: 8px; font-size: 13px; color: #8A857C; letter-spacing: 0.04em; opacity: 0; animation: up 0.9s var(--ease) 0.75s forwards; }
+.author::before { content: '— '; }
 .phrase {
-  margin: 26px 0 0; max-width: 520px; font-size: clamp(16px, 2.4vw, 19px); line-height: 1.45; font-weight: 500;
+  margin: 0; font-style: italic; max-width: 520px; font-size: clamp(16px, 2.4vw, 19px); line-height: 1.45; font-weight: 500;
   color: #D9D4CA; letter-spacing: 0.005em; opacity: 0; animation: up 0.9s var(--ease) 0.55s forwards;
 }
 @keyframes up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -199,6 +208,6 @@ onBeforeUnmount(() => window.clearTimeout(timer))
 
 @media (prefers-reduced-motion: reduce) {
   .blob, .halo { animation: blob-in 0.01s forwards; }
-  .logo, .phrase, .login, .start, .foot { animation-duration: 0.01s; animation-delay: 0s; }
+  .logo, .phrase, .author, .login, .start, .foot { animation-duration: 0.01s; animation-delay: 0s; }
 }
 </style>
