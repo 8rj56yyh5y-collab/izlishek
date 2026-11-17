@@ -1,0 +1,38 @@
+/* Токени взяті з Gobsek (vue-app/src/css/tokens.css), щоб модуль виглядав «своїм». */
+:root {
+  --mg-primary: #3651E6;
+  --mg-primary-soft: rgba(54, 81, 230, 0.10);
+  --mg-positive: #16A34A;
+  --mg-positive-soft: rgba(22, 163, 74, 0.10);
+  --mg-negative: #DC2626;
+  --mg-negative-soft: rgba(220, 38, 38, 0.10);
+  --mg-warning: #B45309;
+  --mg-bg: #ffffff;
+  --mg-bg-2: #F6F7F9;
+  --mg-fg: rgba(0, 0, 0, 0.87);
+  --mg-fg-2: rgba(0, 0, 0, 0.68);
+  --mg-fg-3: rgba(0, 0, 0, 0.58);
+  --mg-border: rgba(0, 0, 0, 0.08);
+  --mg-border-strong: rgba(0, 0, 0, 0.18);
+  --mg-radius-md: 8px;
+  --mg-radius-lg: 12px;
+}
+html, body, #app {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: var(--mg-fg);
+  background: var(--mg-bg-2);
+}
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dev-pos { color: var(--mg-positive); font-weight: 600; }
+.dev-neg { color: var(--mg-negative); font-weight: 600; }
+.dev-zero { color: var(--mg-fg-3); }
+.mg-card {
+  background: var(--mg-bg);
+  border: 1px solid var(--mg-border);
+  border-radius: var(--mg-radius-lg);
+}
+.mg-muted { color: var(--mg-fg-3); }
+.mg-h { font-size: 20px; line-height: 28px; font-weight: 600; margin: 0; letter-spacing: 0; }
+.mg-sub { font-size: 13px; color: var(--mg-fg-3); }
+.q-table th { font-weight: 600; color: var(--mg-fg-2); }
