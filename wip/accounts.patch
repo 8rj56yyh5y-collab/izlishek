@@ -1,0 +1,1189 @@
+From f895c28cb010d4a8d6d1657fc664a742b69e6626 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 17 Nov 2026 17:18:55 +0000
+Subject: [PATCH] =?UTF-8?q?WIP=20(=D0=BD=D0=B0=20=D0=BF=D0=B0=D1=83=D0=B7?=
+ =?UTF-8?q?=D1=96):=20=D0=BE=D0=BA=D1=80=D0=B5=D0=BC=D1=96=20=D0=B0=D0=BA?=
+ =?UTF-8?q?=D0=B0=D1=83=D0=BD=D1=82=D0=B8=20=E2=80=94=20=D0=BB=D0=BE=D0=B3?=
+ =?UTF-8?q?=D1=96=D0=BD+=D0=BF=D0=B0=D1=80=D0=BE=D0=BB=D1=8C,=20=D0=BF?=
+ =?UTF-8?q?=D0=BE=D0=B2=D0=BD=D0=B0=20=D1=96=D0=B7=D0=BE=D0=BB=D1=8F=D1=86?=
+ =?UTF-8?q?=D1=96=D1=8F=20=D0=B4=D0=B0=D0=BD=D0=B8=D1=85,=20=D0=B3=D0=BE?=
+ =?UTF-8?q?=D0=BB=D0=BE=D0=B2=D0=BD=D0=B8=D0=B9=20=D0=B0=D0=BA=D0=B0=D1=83?=
+ =?UTF-8?q?=D0=BD=D1=82=20=D1=81=D1=82=D0=B2=D0=BE=D1=80=D1=8E=D1=94=20?=
+ =?UTF-8?q?=D1=96=D0=BD=D1=88=D1=96?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Bc93v7C6FsgAH98TmQe7Lv
+---
+ app/modules/surplus/accounts.py        | 100 +++++++++++++
+ app/modules/surplus/accounts_router.py |  92 ++++++++++++
+ app/modules/surplus/models.py          |  28 +++-
+ app/modules/surplus/seed.py            |  32 ++--
+ app/modules/surplus/service.py         |  46 ++++--
+ app/shared/auth.py                     | 198 ++++++++++++++++---------
+ app/shared/database.py                 |  12 ++
+ app/shared/tenant.py                   |  36 +++++
+ main.py                                |  10 +-
+ tests/test_surplus.py                  |  84 +++++++++--
+ vue-app/src/components/EntryScreen.vue |  20 ++-
+ vue-app/src/i18n.ts                    |  44 ++++++
+ 12 files changed, 586 insertions(+), 116 deletions(-)
+ create mode 100644 app/modules/surplus/accounts.py
+ create mode 100644 app/modules/surplus/accounts_router.py
+ create mode 100644 app/shared/tenant.py
+
+diff --git a/app/modules/surplus/accounts.py b/app/modules/surplus/accounts.py
+new file mode 100644
+index 0000000..c1d2273
+--- /dev/null
++++ b/app/modules/surplus/accounts.py
+@@ -0,0 +1,100 @@
++"""Акаунти: створення, паролі, первинне налаштування бази.
++
++Кожен акаунт повністю відокремлений. Перший — головний (is_owner): створює інші акаунти
++й скидає їм паролі, але їхніх даних не бачить (дані фільтруються за account_id всюди).
++"""
++from __future__ import annotations
++
++import hashlib
++import re
++import secrets
++
++from fastapi import HTTPException
++from sqlalchemy import func, inspect, select, text
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.surplus.models import Account
++from app.modules.surplus.seed import seed_account
++from app.shared.i18n import L
++
++LOGIN_RE = re.compile(r"^[a-z0-9._-]{2,40}$")
++DATA_TABLES = ("surplus_points", "surplus_materials", "surplus_shipments", "surplus_settlements")
++
++
++def hash_password(password: str, salt: str) -> str:
++    return hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 200_000).hex()
++
++
++def set_password(acc: Account, password: str | None) -> None:
++    if password:
++        acc.password_salt = secrets.token_hex(16)
++        acc.password_hash = hash_password(password, acc.password_salt)
++    else:
++        acc.password_salt = acc.password_hash = None
++
++
++def check_password(acc: Account, password: str) -> bool:
++    if not acc.password_hash:
++        return password == ""
++    return secrets.compare_digest(hash_password(password, acc.password_salt or ""), acc.password_hash)
++
++
++def norm_login(login: str) -> str:
++    return login.strip().lower()
++
++
++async def by_login(db: AsyncSession, login: str) -> Account | None:
++    return await db.scalar(select(Account).where(func.lower(Account.login) == norm_login(login)))
++
++
++async def owner(db: AsyncSession) -> Account | None:
++    return await db.scalar(select(Account).where(Account.is_owner.is_(True)).order_by(Account.id))
++
++
++async def list_accounts(db: AsyncSession) -> list[Account]:
++    return list((await db.scalars(select(Account).order_by(Account.id))).all())
++
++
++async def create_account(db: AsyncSession, login: str, name: str, password: str, *, is_owner: bool = False,
++                         demo: bool = False) -> Account:
++    login = norm_login(login)
++    if not LOGIN_RE.match(login):
++        raise HTTPException(422, L("Логін: 2–40 символів, латиниця, цифри, крапка, дефіс",
++                                   "Логин: 2–40 символов, латиница, цифры, точка, дефис"))
++    if await by_login(db, login):
++        raise HTTPException(422, L("Такий логін уже є", "Такой логин уже есть"))
++    acc = Account(login=login, name=name.strip() or login, is_owner=is_owner)
++    set_password(acc, password)
++    db.add(acc)
++    await db.commit()
++    await db.refresh(acc)
++    await seed_account(db, acc.id, demo=demo)
++    return acc
++
++
++async def bootstrap(db: AsyncSession, app_password: str | None, demo: bool) -> None:
++    """Перший запуск або оновлення зі старої (одноакаунтної) бази.
++
++    * немає акаунтів → головний «admin» з паролем APP_PASSWORD;
++    * дані без account_id (старі записи) → належать головному;
++    * старі налаштування (таблиця surplus_settings) → у налаштування головного.
++    """
++    main = await owner(db)
++    if main is None:
++        main = Account(login="admin", name="Основний", is_owner=True)
++        set_password(main, app_password)
++        db.add(main)
++        await db.commit()
++        await db.refresh(main)
++    for table in DATA_TABLES:
++        await db.execute(text(f"UPDATE {table} SET account_id = :a WHERE account_id IS NULL"), {"a": main.id})
++    conn = await db.connection()
++    has_old = await conn.run_sync(lambda c: inspect(c).has_table("surplus_settings"))
++    if has_old:
++        await db.execute(text(
++            "INSERT INTO surplus_account_settings (account_id, key, value) "
++            "SELECT :a, s.key, s.value FROM surplus_settings s "
++            "WHERE NOT EXISTS (SELECT 1 FROM surplus_account_settings x WHERE x.account_id = :a AND x.key = s.key)"),
++            {"a": main.id})
++    await db.commit()
++    await seed_account(db, main.id, demo=demo)
+diff --git a/app/modules/surplus/accounts_router.py b/app/modules/surplus/accounts_router.py
+new file mode 100644
+index 0000000..b649323
+--- /dev/null
++++ b/app/modules/surplus/accounts_router.py
+@@ -0,0 +1,92 @@
++"""Акаунти: свій профіль і пароль; головний акаунт — створює інші й скидає їм паролі."""
++from __future__ import annotations
++
++from datetime import datetime
++
++from fastapi import APIRouter, HTTPException, Request, Response
++from pydantic import BaseModel, Field
++
++from app.modules.surplus import accounts
++from app.modules.surplus.models import Account
++from app.shared.auth import COOKIE, MAX_AGE, AdminPrincipal, OwnerPrincipal, account_token
++from app.shared.database import SessionDep
++from app.shared.i18n import L
++
++router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
++
++
++class AccountOut(BaseModel):
++    id: int
++    login: str
++    name: str
++    is_owner: bool
++    has_password: bool
++    created_at: datetime | None
++
++    @classmethod
++    def of(cls, a: Account) -> AccountOut:
++        return cls(id=a.id, login=a.login, name=a.name, is_owner=a.is_owner, has_password=bool(a.password_hash),
++                   created_at=a.created_at)
++
++
++class AccountCreate(BaseModel):
++    login: str = Field(min_length=2, max_length=40)
++    name: str = Field(default="", max_length=120)
++    password: str = Field(min_length=6, max_length=200)
++
++
++class AccountUpdate(BaseModel):
++    name: str | None = Field(default=None, max_length=120)
++    password: str | None = Field(default=None, min_length=6, max_length=200)
++
++
++class MeUpdate(BaseModel):
++    name: str | None = Field(default=None, max_length=120)
++    old_password: str = ""
++    new_password: str | None = Field(default=None, min_length=6, max_length=200)
++
++
++@router.get("/me", response_model=AccountOut)
++async def me(session: SessionDep, who: AdminPrincipal):
++    return AccountOut.of(await session.get(Account, who.account_id))
++
++
++@router.put("/me", response_model=AccountOut)
++async def update_me(data: MeUpdate, session: SessionDep, who: AdminPrincipal, response: Response, request: Request):
++    acc = await session.get(Account, who.account_id)
++    if data.name is not None and data.name.strip():
++        acc.name = data.name.strip()
++    if data.new_password:
++        if acc.password_hash and not accounts.check_password(acc, data.old_password):
++            raise HTTPException(422, L("Поточний пароль невірний", "Текущий пароль неверный"))
++        accounts.set_password(acc, data.new_password)
++    await session.commit()
++    await session.refresh(acc)
++    if data.new_password:  # нова сесія, бо підпис старої включав старий пароль
++        response.set_cookie(COOKIE, account_token(acc), max_age=MAX_AGE, httponly=True, samesite="lax",
++                            secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https")
++    return AccountOut.of(acc)
++
++
++@router.get("", response_model=list[AccountOut])
++async def list_all(session: SessionDep, _: OwnerPrincipal):
++    return [AccountOut.of(a) for a in await accounts.list_accounts(session)]
++
++
++@router.post("", response_model=AccountOut, status_code=201)
++async def create(data: AccountCreate, session: SessionDep, _: OwnerPrincipal):
++    return AccountOut.of(await accounts.create_account(session, data.login, data.name, data.password))
++
++
++@router.put("/{account_id}", response_model=AccountOut)
++async def update(account_id: int, data: AccountUpdate, session: SessionDep, _: OwnerPrincipal):
++    acc = await session.get(Account, account_id)
++    if acc is None:
++        raise HTTPException(404, L("Акаунт не знайдено", "Аккаунт не найден"))
++    if data.name is not None and data.name.strip():
++        acc.name = data.name.strip()
++    if data.password:
++        accounts.set_password(acc, data.password)
++    await session.commit()
++    await session.refresh(acc)
++    return AccountOut.of(acc)
+diff --git a/app/modules/surplus/models.py b/app/modules/surplus/models.py
+index 106c4b6..ef694c8 100644
+--- a/app/modules/surplus/models.py
++++ b/app/modules/surplus/models.py
+@@ -39,6 +39,8 @@ class SurplusPoint(Base):
+     __tablename__ = "surplus_points"
+ 
+     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
++    # Акаунт-власник: акаунти повністю відокремлені (свої пункти, матеріали, звірки, налаштування).
++    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+     name: Mapped[str] = mapped_column(String(120), nullable=False)
+     receiver_name: Mapped[str] = mapped_column(String(120), nullable=False)
+     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+@@ -54,6 +56,8 @@ class SurplusMaterial(Base):
+     __tablename__ = "surplus_materials"
+ 
+     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
++    # Акаунт-власник: акаунти повністю відокремлені (свої пункти, матеріали, звірки, налаштування).
++    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+     name: Mapped[str] = mapped_column(String(120), nullable=False)
+     group: Mapped[str] = mapped_column(String(20), nullable=False, default="color")  # color | ferrous
+     price_per_kg: Mapped[Decimal] = mapped_column(PRICE, nullable=False, default=0)
+@@ -69,6 +73,8 @@ class SurplusShipment(Base):
+     __tablename__ = "surplus_shipments"
+ 
+     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
++    # Акаунт-власник: акаунти повністю відокремлені (свої пункти, матеріали, звірки, налаштування).
++    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+     ship_date: Mapped[date] = mapped_column(Date, nullable=False)
+     point_id: Mapped[int] = mapped_column(ForeignKey("surplus_points.id", ondelete="RESTRICT"), nullable=False)
+     # Знімок: приймальник на пункті може змінитися, а відповідальність лишається за тим, хто був.
+@@ -108,6 +114,8 @@ class SurplusSettlement(Base):
+     __tablename__ = "surplus_settlements"
+ 
+     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
++    # Акаунт-власник: акаунти повністю відокремлені (свої пункти, матеріали, звірки, налаштування).
++    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+     settle_date: Mapped[date] = mapped_column(Date, nullable=False)
+     receiver_name: Mapped[str] = mapped_column(String(120), nullable=False)
+     material_id: Mapped[int] = mapped_column(ForeignKey("surplus_materials.id", ondelete="RESTRICT"), nullable=False)
+@@ -119,10 +127,26 @@ class SurplusSettlement(Base):
+     material: Mapped[SurplusMaterial] = relationship()
+ 
+ 
++class Account(Base):
++    """Окремий акаунт (свої пункти, матеріали, звірки). Перший створений — головний (is_owner):
++    він створює інші акаунти й скидає їм паролі, але їхніх даних не бачить."""
++
++    __tablename__ = "accounts"
++
++    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
++    login: Mapped[str] = mapped_column(String(60), nullable=False, unique=True)
++    name: Mapped[str] = mapped_column(String(120), nullable=False)
++    password_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
++    password_salt: Mapped[str | None] = mapped_column(String(64), nullable=True)
++    is_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
++
++
+ class SurplusSetting(Base):
+-    """Налаштування програми: ключ → значення (рядок)."""
++    """Налаштування акаунта: ключ → значення (рядок)."""
+ 
+-    __tablename__ = "surplus_settings"
++    __tablename__ = "surplus_account_settings"
+ 
++    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
+     key: Mapped[str] = mapped_column(String(60), primary_key=True)
+     value: Mapped[str] = mapped_column(Text, nullable=False)
+diff --git a/app/modules/surplus/seed.py b/app/modules/surplus/seed.py
+index ac4eb86..aeff2d5 100644
+--- a/app/modules/surplus/seed.py
++++ b/app/modules/surplus/seed.py
+@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ from app.modules.surplus import schemas as s
+ from app.modules.surplus import service
+ from app.modules.surplus.models import SurplusMaterial, SurplusPoint
++from app.shared.tenant import use_account
+ 
+ # (назва як у WebMax, як пишуть у зошитах/скрінах — через кому)
+ MATERIALS: list[tuple[str, str]] = [
+@@ -72,20 +73,25 @@ DEMO_PRICES = {"Алюминий": "60", "АЛ электротех": "65", "А
+                "Медь 1 сорт": "360", "Латунь/Бронза": "200", "Титан": "80", "Н/Ж (10%)": "40", "ЦАМ": "50"}
+ 
+ 
+-async def seed(db: AsyncSession, demo: bool = True) -> None:
+-    """Довідники — завжди при порожній базі; приклад і демо-відвантаження — лише з demo."""
+-    if await db.scalar(select(func.count()).select_from(SurplusMaterial)):
+-        return
+-    for i, (name, aliases) in enumerate(MATERIALS, start=1):
+-        price = D(DEMO_PRICES.get(name, "0")) if demo else D("0")
+-        db.add(SurplusMaterial(name=name, group="color", price_per_kg=price, aliases=aliases, sort=i * 10))
+-    p1 = SurplusPoint(name="Пункт №1", receiver_name="Приймальник 1")
+-    p2 = SurplusPoint(name="Пункт №2", receiver_name="Приймальник 2")
+-    db.add_all([p1, p2])
+-    await db.commit()
+-    if not demo:
+-        return
++async def seed_account(db: AsyncSession, acc: int, demo: bool = False) -> None:
++    """Довідники нового (порожнього) акаунта: позиції WebMax і один пункт; демо — лише за прапорцем."""
++    with use_account(acc):
++        if await db.scalar(select(func.count()).select_from(SurplusMaterial).where(SurplusMaterial.account_id == acc)):
++            return
++        for i, (name, aliases) in enumerate(MATERIALS, start=1):
++            price = D(DEMO_PRICES.get(name, "0")) if demo else D("0")
++            db.add(SurplusMaterial(account_id=acc, name=name, group="color", price_per_kg=price, aliases=aliases, sort=i * 10))
++        p1 = SurplusPoint(account_id=acc, name="Пункт №1", receiver_name="Приймальник 1")
++        db.add(p1)
++        if demo:
++            p2 = SurplusPoint(account_id=acc, name="Пункт №2", receiver_name="Приймальник 2")
++            db.add(p2)
++        await db.commit()
++        if demo:
++            await _demo(db, p1, p2)
+ 
++
++async def _demo(db: AsyncSession, p1: SurplusPoint, p2: SurplusPoint) -> None:
+     mats = {m.name: m.id for m in await service.list_materials(db)}
+ 
+     def lines(rows):
+diff --git a/app/modules/surplus/service.py b/app/modules/surplus/service.py
+index c324881..bc10eeb 100644
+--- a/app/modules/surplus/service.py
++++ b/app/modules/surplus/service.py
+@@ -21,6 +21,7 @@ from app.modules.surplus.models import (
+     SurplusShipmentLine,
+ )
+ from app.shared.i18n import L
++from app.shared.tenant import account_id
+ 
+ ZERO = Decimal("0")
+ 
+@@ -85,12 +86,13 @@ class _Acc:
+ 
+ # ── Довідники ───────────────────────────────────────────────────────────────
+ async def list_points(db: AsyncSession) -> list[SurplusPoint]:
+-    return list((await db.scalars(select(SurplusPoint).order_by(SurplusPoint.name))).all())
++    q = select(SurplusPoint).where(SurplusPoint.account_id == account_id()).order_by(SurplusPoint.name)
++    return list((await db.scalars(q)).all())
+ 
+ 
+ async def save_point(db: AsyncSession, data: s.PointIn, point_id: int | None = None) -> SurplusPoint:
+     if point_id is None:
+-        obj = SurplusPoint()
++        obj = SurplusPoint(account_id=account_id())
+         db.add(obj)
+     else:
+         obj = await _get(db, SurplusPoint, point_id, ("Пункт", "Пункт"))
+@@ -102,13 +104,14 @@ async def save_point(db: AsyncSession, data: s.PointIn, point_id: int | None = N
+ 
+ 
+ async def list_materials(db: AsyncSession) -> list[SurplusMaterial]:
+-    q = select(SurplusMaterial).order_by(SurplusMaterial.sort, SurplusMaterial.name)
++    q = (select(SurplusMaterial).where(SurplusMaterial.account_id == account_id())
++         .order_by(SurplusMaterial.sort, SurplusMaterial.name))
+     return list((await db.scalars(q)).all())
+ 
+ 
+ async def save_material(db: AsyncSession, data: s.MaterialIn, material_id: int | None = None) -> SurplusMaterial:
+     if material_id is None:
+-        obj = SurplusMaterial()
++        obj = SurplusMaterial(account_id=account_id())
+         db.add(obj)
+     else:
+         obj = await _get(db, SurplusMaterial, material_id, ("Матеріал", "Материал"))
+@@ -121,14 +124,15 @@ async def save_material(db: AsyncSession, data: s.MaterialIn, material_id: int |
+ 
+ async def _get(db: AsyncSession, model, obj_id: int, label: tuple[str, str]):
+     obj = await db.get(model, obj_id)
+-    if obj is None:
++    # Чужий акаунт = «не знайдено»: навіть існування запису іншого акаунта не розкриваємо.
++    if obj is None or obj.account_id != account_id():
+         raise HTTPException(404, L(f"{label[0]} #{obj_id} не знайдено", f"{label[1]} #{obj_id} не найден"))
+     return obj
+ 
+ 
+ # ── Відвантаження ───────────────────────────────────────────────────────────
+ def _shipment_query():
+-    return select(SurplusShipment).options(
++    return select(SurplusShipment).where(SurplusShipment.account_id == account_id()).options(
+         selectinload(SurplusShipment.lines).selectinload(SurplusShipmentLine.material),
+         selectinload(SurplusShipment.point),
+     )
+@@ -205,7 +209,7 @@ async def save_shipment(db: AsyncSession, data: s.ShipmentIn, shipment_id: int |
+             raise HTTPException(422, L(f"Матеріал #{ln.material_id} не знайдено", f"Материал #{ln.material_id} не найден"))
+ 
+     if shipment_id is None:
+-        sh = SurplusShipment()
++        sh = SurplusShipment(account_id=account_id())
+         db.add(sh)
+     else:
+         sh = await get_shipment(db, shipment_id)
+@@ -256,7 +260,8 @@ def settlement_out(st: SurplusSettlement) -> s.SettlementOut:
+ 
+ 
+ async def list_settlements(db: AsyncSession, receiver: str | None = None, date_to: date | None = None) -> list[SurplusSettlement]:
+-    q = select(SurplusSettlement).options(selectinload(SurplusSettlement.material))
++    q = (select(SurplusSettlement).where(SurplusSettlement.account_id == account_id())
++         .options(selectinload(SurplusSettlement.material)))
+     if receiver:
+         q = q.where(SurplusSettlement.receiver_name == receiver)
+     if date_to:
+@@ -268,6 +273,7 @@ async def list_settlements(db: AsyncSession, receiver: str | None = None, date_t
+ async def create_settlement(db: AsyncSession, data: s.SettlementIn) -> SurplusSettlement:
+     mat = await _get(db, SurplusMaterial, data.material_id, ("Матеріал", "Материал"))
+     st = SurplusSettlement(
++        account_id=account_id(),
+         settle_date=data.settle_date,
+         receiver_name=data.receiver_name.strip(),
+         material_id=mat.id,
+@@ -483,14 +489,14 @@ SETTING_DEFAULTS = {"receiver_mode": "0"}
+ 
+ 
+ async def get_settings_map(db: AsyncSession) -> dict[str, str]:
+-    rows = (await db.scalars(select(SurplusSetting))).all()
++    rows = (await db.scalars(select(SurplusSetting).where(SurplusSetting.account_id == account_id()))).all()
+     return {**SETTING_DEFAULTS, **{r.key: r.value for r in rows}}
+ 
+ 
+ async def set_setting(db: AsyncSession, key: str, value: str) -> None:
+-    row = await db.get(SurplusSetting, key)
++    row = await db.get(SurplusSetting, (account_id(), key))
+     if row is None:
+-        db.add(SurplusSetting(key=key, value=value))
++        db.add(SurplusSetting(account_id=account_id(), key=key, value=value))
+     else:
+         row.value = value
+     await db.commit()
+@@ -512,8 +518,10 @@ def parse_quotes(raw: str | None) -> list[dict[str, str]]:
+     return out
+ 
+ 
+-async def receiver_mode(db: AsyncSession) -> bool:
+-    return (await get_settings_map(db)).get("receiver_mode") == "1"
++async def receiver_mode(db: AsyncSession, acc: int | None = None) -> bool:
++    acc = acc if acc is not None else account_id()
++    row = await db.get(SurplusSetting, (acc, "receiver_mode"))
++    return row is not None and row.value == "1"
+ 
+ 
+ # ── PIN приймальника ────────────────────────────────────────────────────────
+@@ -524,7 +532,8 @@ def hash_pin(pin: str, salt: str) -> str:
+ async def set_point_pin(db: AsyncSession, point_id: int, pin: str | None) -> SurplusPoint:
+     point = await _get(db, SurplusPoint, point_id, ("Пункт", "Пункт"))
+     if pin:
+-        for other in await list_points(db):
++        # PIN унікальний на ВСІ акаунти: приймальник входить лише за PIN, без логіна.
++        for other in await all_points_with_pin(db):
+             if other.id != point.id and other.pin_hash and hash_pin(pin, other.pin_salt) == other.pin_hash:
+                 raise HTTPException(422, L("Такий PIN уже має інший пункт", "Такой PIN уже у другого пункта"))
+         point.pin_salt = secrets.token_hex(16)
+@@ -536,8 +545,13 @@ async def set_point_pin(db: AsyncSession, point_id: int, pin: str | None) -> Sur
+     return point
+ 
+ 
++async def all_points_with_pin(db: AsyncSession) -> list[SurplusPoint]:
++    return list((await db.scalars(select(SurplusPoint).where(SurplusPoint.pin_hash.is_not(None)))).all())
++
++
+ async def point_by_pin(db: AsyncSession, pin: str) -> SurplusPoint | None:
+-    for p in await list_points(db):
++    """Шукає по всіх акаунтах (вхід приймальника ще до визначення акаунта)."""
++    for p in await all_points_with_pin(db):
+         if p.is_active and p.pin_hash and secrets.compare_digest(hash_pin(pin, p.pin_salt), p.pin_hash):
+             return p
+     return None
+@@ -567,7 +581,7 @@ async def save_submission(db: AsyncSession, point: SurplusPoint, data: s.Submiss
+         if ln.material_id not in materials:
+             raise HTTPException(422, L(f"Матеріал #{ln.material_id} не знайдено", f"Материал #{ln.material_id} не найден"))
+     if shipment_id is None:
+-        sh = SurplusShipment(point_id=point.id, receiver_name=point.receiver_name, destination="ДМС",
++        sh = SurplusShipment(account_id=point.account_id, point_id=point.id, receiver_name=point.receiver_name, destination="ДМС",
+                              status="pending", submitted_by_receiver=True)
+         db.add(sh)
+     else:
+diff --git a/app/shared/auth.py b/app/shared/auth.py
+index 56b5841..77d734d 100644
+--- a/app/shared/auth.py
++++ b/app/shared/auth.py
+@@ -1,14 +1,14 @@
+-"""Вхід і ролі.
++"""Вхід, акаунти й ролі.
+ 
+-* **Адміністратор** — пароль ``APP_PASSWORD``. Бачить і робить усе.
+-* **Приймальник** — PIN свого пункту (задається в «Довідниках»), лише коли в
+-  налаштуваннях увімкнено «Версію приймальника». Бачить тільки свою здачу,
+-  свої здачі й свій баланс; ваги складу до звірки не бачить.
++* **Акаунт** — повністю окремий набір даних (пункти, матеріали, звірки, налаштування).
++  Вхід — логін + пароль акаунта. Перший акаунт головний: створює інші.
++* **Приймальник** — лише PIN свого пункту (PIN унікальний на всі акаунти), коли в його
++  акаунті ввімкнено «Версію приймальника». Бачить тільки свою здачу й свій баланс.
+ 
+ Сесія — HttpOnly-cookie з HMAC-підписом:
+-``a.<sig>`` для адміністратора, ``r.<point_id>.<sig>`` для приймальника.
+-Підпис залежить від пароля / хешу PIN, тож зміна пароля чи PIN анулює сесії.
+-Без ``APP_PASSWORD`` (локальна робота) кожен — адміністратор.
++``a.<account_id>.<sig>`` — акаунт, ``r.<point_id>.<sig>`` — приймальник.
++Підпис включає хеш пароля / PIN, тож зміна пароля чи PIN анулює сесії.
++Без змінної ``APP_PASSWORD`` (локальна робота) без входу відкривається головний акаунт.
+ """
+ from __future__ import annotations
+ 
+@@ -24,12 +24,14 @@ from typing import Annotated
+ 
+ from fastapi import APIRouter, Depends, HTTPException, Request, Response
+ from pydantic import BaseModel
++from sqlalchemy import text
+ from starlette.responses import JSONResponse
+ from starlette.types import ASGIApp, Receive, Scope, Send
+ 
+ from app.shared.config import get_settings
+-from app.shared.database import get_session
++from app.shared.database import session_scope
+ from app.shared.i18n import L
++from app.shared.tenant import reset_account, set_account
+ 
+ COOKIE = "bt_session"
+ MAX_AGE = 60 * 24 * 3600
+@@ -40,29 +42,32 @@ RECEIVER_ALLOWED = (
+     ("GET", "/api/v1/surplus/materials"),
+     ("POST", "/api/v1/surplus/recognize"),
+ )
+-_SECRET = (os.getenv("SECRET_KEY") or secrets.token_hex(32)).encode()
+ 
+ 
+ @dataclass(frozen=True)
+ class Principal:
+     role: str  # admin | receiver
++    account_id: int
+     point_id: int | None = None
++    is_owner: bool = False
+ 
+ 
+-def _sign(msg: str) -> str:
+-    return hmac.new(_SECRET, msg.encode(), hashlib.sha256).hexdigest()
++def _key() -> bytes:
++    # Стабільний між перезапусками: SECRET_KEY → APP_PASSWORD → константа (локально).
++    # Підробити підпис без хешу пароля/PIN з бази все одно не можна.
++    return (os.getenv("SECRET_KEY") or get_settings().app_password or "brukhtarnia-local").encode()
+ 
+ 
+-def admin_token(password: str) -> str:
+-    # Без SECRET_KEY секрет випадковий на кожен запуск; тоді підписуємо самим паролем,
+-    # щоб сесії адміністратора пережили перезапуск сервера.
+-    key = os.getenv("SECRET_KEY") or password
+-    return "a." + hmac.new(key.encode(), f"a:{password}".encode(), hashlib.sha256).hexdigest()
++def _sig(msg: str) -> str:
++    return hmac.new(_key(), msg.encode(), hashlib.sha256).hexdigest()
++
++
++def account_token(acc) -> str:
++    return f"a.{acc.id}." + _sig(f"a:{acc.id}:{acc.password_hash or ''}")
+ 
+ 
+ def receiver_token(point_id: int, pin_hash: str) -> str:
+-    key = os.getenv("SECRET_KEY") or (get_settings().app_password or "")
+-    return f"r.{point_id}." + hmac.new(key.encode(), f"r:{point_id}:{pin_hash}".encode(), hashlib.sha256).hexdigest()
++    return f"r.{point_id}." + _sig(f"r:{point_id}:{pin_hash}")
+ 
+ 
+ def _cookie(cookie_header: str) -> str | None:
+@@ -73,30 +78,34 @@ def _cookie(cookie_header: str) -> str | None:
+     return None
+ 
+ 
+-async def resolve(cookie_header: str) -> Principal | None:
+-    password = get_settings().app_password
+-    if not password:
+-        return Principal("admin")
+-    tok = _cookie(cookie_header)
+-    if not tok:
+-        return None
+-    if tok.startswith("a.") and secrets.compare_digest(tok, admin_token(password)):
+-        return Principal("admin")
+-    if tok.startswith("r."):
+-        from app.modules.surplus import service  # лінивий імпорт: модуль залежить від shared
++def password_mode() -> bool:
++    """Чи потрібен вхід (на сервері задано APP_PASSWORD)."""
++    return bool(get_settings().app_password)
+ 
+-        try:
+-            point_id = int(tok.split(".")[1])
+-        except (IndexError, ValueError):
+-            return None
+-        async for db in get_session():
+-            if not await service.receiver_mode(db):
+-                return None
+-            from app.modules.surplus.models import SurplusPoint
+-
+-            p = await db.get(SurplusPoint, point_id)
+-            if p and p.is_active and p.pin_hash and secrets.compare_digest(tok, receiver_token(p.id, p.pin_hash)):
+-                return Principal("receiver", p.id)
++
++async def resolve(cookie_header: str) -> Principal | None:
++    from app.modules.surplus import accounts, service
++    from app.modules.surplus.models import Account, SurplusPoint
++
++    tok = _cookie(cookie_header) or ""
++    parts = tok.split(".")
++    async with session_scope() as db:
++        if len(parts) == 3 and parts[1].isdigit():
++            kind, oid = parts[0], int(parts[1])
++            if kind == "a":
++                acc = await db.get(Account, oid)
++                if acc and secrets.compare_digest(tok, account_token(acc)):
++                    return Principal("admin", acc.id, is_owner=acc.is_owner)
++            elif kind == "r":
++                p = await db.get(SurplusPoint, oid)
++                if (p and p.is_active and p.pin_hash and p.account_id
++                        and secrets.compare_digest(tok, receiver_token(p.id, p.pin_hash))
++                        and await service.receiver_mode(db, p.account_id)):
++                    return Principal("receiver", p.account_id, point_id=p.id)
++        if not password_mode():
++            main = await accounts.owner(db)
++            if main:
++                return Principal("admin", main.id, is_owner=True)
+     return None
+ 
+ 
+@@ -119,7 +128,11 @@ class AuthMiddleware:
+         if who.role == "receiver" and not _receiver_may(scope["method"], path):
+             return await JSONResponse({"detail": L("Недостатньо прав", "Недостаточно прав")}, status_code=403)(scope, receive, send)
+         scope.setdefault("state", {})["principal"] = who
+-        await self.app(scope, receive, send)
++        token = set_account(who.account_id)  # далі КОЖЕН запит до даних фільтрується цим акаунтом
++        try:
++            await self.app(scope, receive, send)
++        finally:
++            reset_account(token)
+ 
+ 
+ def _principal(request: Request) -> Principal:
+@@ -132,6 +145,25 @@ def _principal(request: Request) -> Principal:
+ CurrentPrincipal = Annotated[Principal, Depends(_principal)]
+ 
+ 
++def _admin(request: Request) -> Principal:
++    who = _principal(request)
++    if who.role != "admin":
++        raise HTTPException(403, L("Недостатньо прав", "Недостаточно прав"))
++    return who
++
++
++def _owner(request: Request) -> Principal:
++    who = _admin(request)
++    if not who.is_owner:
++        raise HTTPException(403, L("Лише головний акаунт може керувати акаунтами",
++                                   "Только главный аккаунт может управлять аккаунтами"))
++    return who
++
++
++AdminPrincipal = Annotated[Principal, Depends(_admin)]
++OwnerPrincipal = Annotated[Principal, Depends(_owner)]
++
++
+ # ── Вхід ────────────────────────────────────────────────────────────────────
+ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+ 
+@@ -146,37 +178,49 @@ def _client(request: Request) -> str:
+ 
+ 
+ class LoginIn(BaseModel):
++    login: str = ""
+     password: str
+ 
+ 
+ @router.get("/status")
+ async def status(request: Request):
+-    from app.modules.surplus import service
+-    from app.modules.surplus.models import SurplusPoint
++    from app.modules.surplus import accounts, service
++    from app.modules.surplus.models import Account, SurplusPoint
+ 
+     who = await resolve(request.headers.get("cookie", ""))
+-    out: dict = {"required": bool(get_settings().app_password), "ok": who is not None,
+-                 "role": who.role if who else None}
+-    async for db in get_session():
+-        out["receiver_mode"] = await service.receiver_mode(db)
+-        if who and who.role == "receiver":
+-            p = await db.get(SurplusPoint, who.point_id)
+-            out.update(point_id=p.id, point_name=p.name, receiver_name=p.receiver_name)
++    out: dict = {"required": password_mode(), "ok": who is not None, "role": who.role if who else None,
++                 "receiver_mode": False, "multi": False}
++    async with session_scope() as db:
++        out["multi"] = len(await accounts.list_accounts(db)) > 1
++        # чи є хоч один акаунт із увімкненою версією приймальника — для підказки «або PIN»
++        out["receiver_mode"] = bool(await db.scalar(
++            text("SELECT 1 FROM surplus_account_settings WHERE key='receiver_mode' AND value='1' LIMIT 1")))
++        if who:
++            acc = await db.get(Account, who.account_id)
++            out.update(account_id=acc.id, account_name=acc.name, account_login=acc.login, is_owner=acc.is_owner)
++            if who.role == "receiver":
++                p = await db.get(SurplusPoint, who.point_id)
++                out.update(point_id=p.id, point_name=p.name, receiver_name=p.receiver_name)
++            else:
++                out["receiver_mode"] = await service.receiver_mode(db, acc.id)
+     return out
+ 
+ 
+ @router.get("/quotes")
+ async def quotes():
+-    """Свої цитати для екрана входу (до входу, тож без авторизації — там лише текст цитат)."""
+-    from app.modules.surplus import service
++    """Цитати для екрана входу — головного акаунта (до входу акаунт ще невідомий)."""
++    from app.modules.surplus import accounts, service
++    from app.modules.surplus.models import SurplusSetting
+ 
+-    async for db in get_session():
+-        return service.parse_quotes((await service.get_settings_map(db)).get("quotes"))
++    async with session_scope() as db:
++        main = await accounts.owner(db)
++        row = await db.get(SurplusSetting, (main.id, "quotes")) if main else None
++        return service.parse_quotes(row.value if row else None)
+ 
+ 
+ @router.post("/login")
+ async def login(data: LoginIn, request: Request, response: Response):
+-    from app.modules.surplus import service
++    from app.modules.surplus import accounts, service
+ 
+     ip = _client(request)
+     now = time.monotonic()
+@@ -185,29 +229,45 @@ async def login(data: LoginIn, request: Request, response: Response):
+         return JSONResponse({"detail": L("Забагато спроб. Спробуйте за 10 хвилин.", "Слишком много попыток. Попробуйте через 10 минут.")},
+                             status_code=429)
+ 
+-    password = get_settings().app_password
+     secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+     token = role = None
+-    if password and secrets.compare_digest(data.password.encode(), password.encode()):
+-        token, role = admin_token(password), "admin"
+-    elif not password and not data.password:
+-        role = "admin"
+-    else:
+-        async for db in get_session():
+-            if data.password.isdigit() and await service.receiver_mode(db):
++    async with session_scope() as db:
++        if data.login.strip():
++            acc = await accounts.by_login(db, data.login)
++            if acc and check_and_allowed(acc, data.password):
++                token, role = account_token(acc), "admin"
++        else:
++            # без логіна: PIN приймальника, або пароль, якщо акаунт лише один
++            if data.password.isdigit():
+                 p = await service.point_by_pin(db, data.password)
+-                if p:
++                if p and await service.receiver_mode(db, p.account_id):
+                     token, role = receiver_token(p.id, p.pin_hash), "receiver"
++            if role is None:
++                all_acc = await accounts.list_accounts(db)
++                if len(all_acc) == 1 and check_and_allowed(all_acc[0], data.password):
++                    token, role = account_token(all_acc[0]), "admin"
++                elif len(all_acc) > 1 and not data.password.isdigit():
++                    _FAILS[ip].append(now)
++                    await asyncio.sleep(0.7)
++                    return JSONResponse({"detail": L("Вкажіть логін", "Укажите логин")}, status_code=401)
+     if role is None:
+         _FAILS[ip].append(now)
+         await asyncio.sleep(0.7)
+-        return JSONResponse({"detail": L("Невірний пароль", "Неверный пароль")}, status_code=401)
++        return JSONResponse({"detail": L("Невірний логін або пароль", "Неверный логин или пароль")}, status_code=401)
+     _FAILS.pop(ip, None)
+-    if token:
+-        response.set_cookie(COOKIE, token, max_age=MAX_AGE, httponly=True, samesite="lax", secure=secure)
++    response.set_cookie(COOKIE, token, max_age=MAX_AGE, httponly=True, samesite="lax", secure=secure)
+     return {"ok": True, "role": role}
+ 
+ 
++def check_and_allowed(acc, password: str) -> bool:
++    from app.modules.surplus import accounts
++
++    # Порожній пароль акаунта пускає лише в локальному режимі (без APP_PASSWORD на сервері).
++    if not acc.password_hash and password_mode():
++        return False
++    return accounts.check_password(acc, password)
++
++
+ @router.post("/logout")
+ async def logout(response: Response):
+     response.delete_cookie(COOKIE)
+diff --git a/app/shared/database.py b/app/shared/database.py
+index d14f0f4..44262ec 100644
+--- a/app/shared/database.py
++++ b/app/shared/database.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ from collections.abc import AsyncIterator
++from contextlib import asynccontextmanager
+ from typing import Annotated
+ 
+ from fastapi import Depends
+@@ -43,4 +44,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
+         yield session
+ 
+ 
++@asynccontextmanager
++async def session_scope() -> AsyncIterator[AsyncSession]:
++    """Сесія поза ендпоінтом (middleware, вхід). На відміну від `async for … in get_session()`
++    з `return` усередині, гарантовано закривається одразу, а не колись збирачем сміття."""
++    if _session_factory is None:
++        init_engine()
++    assert _session_factory is not None
++    async with _session_factory() as session:
++        yield session
++
++
+ SessionDep = Annotated[AsyncSession, Depends(get_session)]
+diff --git a/app/shared/tenant.py b/app/shared/tenant.py
+new file mode 100644
+index 0000000..c70503f
+--- /dev/null
++++ b/app/shared/tenant.py
+@@ -0,0 +1,36 @@
++"""Поточний акаунт запиту.
++
++AuthMiddleware ставить його після перевірки сесії; сервіс бере звідси і фільтрує КОЖЕН
++запит до даних (пункти, матеріали, звірки, погашення, налаштування). Якщо акаунт не
++виставлено — помилка, а не «усі дані»: витік між акаунтами гірший за 500.
++"""
++from __future__ import annotations
++
++from contextlib import contextmanager
++from contextvars import ContextVar
++
++_account: ContextVar[int | None] = ContextVar("account_id", default=None)
++
++
++def account_id() -> int:
++    v = _account.get()
++    if v is None:
++        raise RuntimeError("Акаунт запиту не визначено")
++    return v
++
++
++def set_account(v: int | None):
++    return _account.set(v)
++
++
++def reset_account(token) -> None:
++    _account.reset(token)
++
++
++@contextmanager
++def use_account(v: int):
++    token = _account.set(v)
++    try:
++        yield
++    finally:
++        _account.reset(token)
+diff --git a/main.py b/main.py
+index 4d4ccc4..5b8ff23 100644
+--- a/main.py
++++ b/main.py
+@@ -10,13 +10,14 @@ from fastapi.staticfiles import StaticFiles
+ from app.modules.surplus import models  # noqa: F401 — реєстрація таблиць
+ from app.modules.surplus.receiver_router import router as receiver_router
+ from app.modules.surplus.router import router as surplus_router
+-from app.modules.surplus.seed import seed
++from app.modules.surplus.accounts import bootstrap
++from app.modules.surplus.accounts_router import router as accounts_router
+ from app.shared.auth import AuthMiddleware
+ from app.shared.auth import router as auth_router
+ from app.shared.config import get_settings
+ from app.shared.i18n import LangMiddleware
+ from app.shared.schema_sync import add_missing_columns
+-from app.shared.database import Base, get_engine, get_session
++from app.shared.database import Base, get_engine, session_scope
+ 
+ SPA = Path(__file__).parent / "static" / "spa"
+ 
+@@ -26,8 +27,8 @@ async def lifespan(_: FastAPI):
+     async with get_engine().begin() as conn:
+         await conn.run_sync(Base.metadata.create_all)
+         await conn.run_sync(add_missing_columns)
+-    async for db in get_session():
+-        await seed(db, demo=get_settings().seed_demo)
++    async with session_scope() as db:
++        await bootstrap(db, get_settings().app_password, demo=get_settings().seed_demo)
+     yield
+ 
+ 
+@@ -38,6 +39,7 @@ app.add_middleware(LangMiddleware)
+ app.include_router(auth_router)
+ app.include_router(surplus_router)
+ app.include_router(receiver_router)
++app.include_router(accounts_router)
+ 
+ 
+ @app.get("/api/v1/health", tags=["system"])
+diff --git a/tests/test_surplus.py b/tests/test_surplus.py
+index 0571dde..dec771e 100644
+--- a/tests/test_surplus.py
++++ b/tests/test_surplus.py
+@@ -163,17 +163,26 @@ async def test_recognize_text_endpoint_and_photo_without_key(client, monkeypatch
+     assert r.status_code == 503
+ 
+ 
+-async def test_login_cookie_and_lang(client, monkeypatch):
++async def _password_mode(client, monkeypatch, pw="admin-pw"):
++    """Задає пароль головному акаунту (поки вхід не потрібен) і вмикає режим із паролем."""
+     from app.shared.config import get_settings
+-    monkeypatch.setenv("APP_PASSWORD", "secret")
++    r = await client.put("/api/v1/accounts/me", json={"new_password": pw})
++    assert r.status_code == 200, r.text
++    monkeypatch.setenv("APP_PASSWORD", "on")
+     get_settings.cache_clear()
++    client.cookies.clear()
++
++
++async def test_login_cookie_and_lang(client, monkeypatch):
++    await _password_mode(client, monkeypatch, "secret1")
+     st = (await client.get("/api/v1/auth/status")).json()
+     assert st["required"] is True and st["ok"] is False
+     r = await client.get("/api/v1/surplus/points", headers={"X-Lang": "ru"})
+     assert r.status_code == 401 and r.json()["detail"] == "Нужно войти"
+-    r = await client.post("/api/v1/auth/login", json={"password": "nope"})
+-    assert r.status_code == 401 and r.json()["detail"] == "Невірний пароль"
+-    r = await client.post("/api/v1/auth/login", json={"password": "secret"})
++    r = await client.post("/api/v1/auth/login", json={"login": "admin", "password": "nope"})
++    assert r.status_code == 401 and r.json()["detail"] == "Невірний логін або пароль"
++    # один акаунт — логін можна не вводити
++    r = await client.post("/api/v1/auth/login", json={"password": "secret1"})
+     assert r.status_code == 200 and "bt_session" in r.cookies
+     assert (await client.get("/api/v1/surplus/points")).status_code == 200
+     r = await client.get("/api/v1/surplus/shipments/999", headers={"X-Lang": "ru"})
+@@ -181,14 +190,71 @@ async def test_login_cookie_and_lang(client, monkeypatch):
+     assert (await client.get("/api/v1/health")).status_code == 200
+ 
+ 
++async def test_accounts_are_isolated(client, monkeypatch):
++    from httpx import ASGITransport, AsyncClient
++
++    from main import app
++    await _password_mode(client, monkeypatch)
++    await client.post("/api/v1/auth/login", json={"login": "admin", "password": "admin-pw"})
++    r = await client.post("/api/v1/accounts", json={"login": "Danylo", "name": "Данило", "password": "dan-pass"})
++    assert r.status_code == 201 and r.json()["login"] == "danylo"
++    assert (await client.post("/api/v1/accounts", json={"login": "danylo", "password": "xxxxxx"})).status_code == 422
++
++    # дані головного
++    p_admin = (await client.get("/api/v1/surplus/points")).json()[0]
++    al = next(m for m in (await client.get("/api/v1/surplus/materials")).json() if m["name"] == "Алюминий")
++    sh = (await client.post("/api/v1/surplus/shipments", json={"ship_date": "2026-11-17", "point_id": p_admin["id"],
++        "lines": [{"material_id": al["id"], "point_kg": "10", "warehouse_kg": "9"}]})).json()
++    await client.put("/api/v1/surplus/settings", json={"receiver_mode": True, "quotes": "Q — A"})
++
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as dc:
++        # з кількома акаунтами без логіна не пускає
++        r = await dc.post("/api/v1/auth/login", json={"password": "dan-pass"})
++        assert r.status_code == 401 and r.json()["detail"] == "Вкажіть логін"
++        assert (await dc.post("/api/v1/auth/login", json={"login": "DANYLO", "password": "dan-pass"})).status_code == 200
++        st = (await dc.get("/api/v1/auth/status")).json()
++        assert st["account_name"] == "Данило" and st["is_owner"] is False
++        # свої довідники (позиції WebMax), а чужого не видно
++        mats = (await dc.get("/api/v1/surplus/materials")).json()
++        assert len(mats) == 29 and al["id"] not in [m["id"] for m in mats]
++        pts = (await dc.get("/api/v1/surplus/points")).json()
++        assert p_admin["id"] not in [p["id"] for p in pts]
++        assert (await dc.get("/api/v1/surplus/shipments")).json() == []
++        assert (await dc.get("/api/v1/surplus/summary")).json()["shipments"] == 0
++        assert (await dc.get(f"/api/v1/surplus/shipments/{sh['id']}")).status_code == 404
++        assert (await dc.delete(f"/api/v1/surplus/shipments/{sh['id']}")).status_code == 404
++        # чужий пункт/матеріал у своїй звірці — не можна
++        r = await dc.post("/api/v1/surplus/shipments", json={"ship_date": "2026-11-17", "point_id": p_admin["id"],
++            "lines": [{"material_id": mats[0]["id"], "point_kg": "1", "warehouse_kg": "1"}]})
++        assert r.status_code == 404
++        r = await dc.post("/api/v1/surplus/shipments", json={"ship_date": "2026-11-17", "point_id": pts[0]["id"],
++            "lines": [{"material_id": al["id"], "point_kg": "1", "warehouse_kg": "1"}]})
++        assert r.status_code == 422
++        # налаштування окремі
++        assert (await dc.get("/api/v1/surplus/settings")).json() == {"receiver_mode": False, "quotes": ""}
++        # керувати акаунтами може лише головний
++        assert (await dc.get("/api/v1/accounts")).status_code == 403
++        # PIN унікальний на всі акаунти
++        await client.put(f"/api/v1/surplus/points/{p_admin['id']}/pin", json={"pin": "5555"})
++        r = await dc.put(f"/api/v1/surplus/points/{pts[0]['id']}/pin", json={"pin": "5555"})
++        assert r.status_code == 422
++        # зміна власного пароля
++        assert (await dc.put("/api/v1/accounts/me", json={"old_password": "bad", "new_password": "new-pass"})).status_code == 422
++        assert (await dc.put("/api/v1/accounts/me", json={"old_password": "dan-pass", "new_password": "new-pass"})).status_code == 200
++        assert (await dc.get("/api/v1/surplus/points")).status_code == 200  # сесію оновлено
++
++    # головний бачить список акаунтів і може скинути пароль
++    accs = (await client.get("/api/v1/accounts")).json()
++    assert [a["login"] for a in accs] == ["admin", "danylo"]
++    assert (await client.put(f"/api/v1/accounts/{accs[1]['id']}", json={"password": "reset-pass"})).status_code == 200
++
++
+ async def test_receiver_mode_flow(client, monkeypatch):
+     from httpx import ASGITransport, AsyncClient
+ 
+-    from app.shared.config import get_settings
+     from main import app
+-    monkeypatch.setenv("APP_PASSWORD", "admin-pw")
+-    get_settings.cache_clear()
+-    assert (await client.post("/api/v1/auth/login", json={"password": "admin-pw"})).status_code == 200
++    await _password_mode(client, monkeypatch)
++    assert (await client.post("/api/v1/auth/login", json={"login": "admin", "password": "admin-pw"})).status_code == 200
+     point = (await client.get("/api/v1/surplus/points")).json()[0]
+     al = next(m for m in (await client.get("/api/v1/surplus/materials")).json() if m["name"] == "Алюминий")
+     assert (await client.put(f"/api/v1/surplus/points/{point['id']}/pin", json={"pin": "12"})).status_code == 422
+diff --git a/vue-app/src/components/EntryScreen.vue b/vue-app/src/components/EntryScreen.vue
+index 9afb9bc..307939b 100644
+--- a/vue-app/src/components/EntryScreen.vue
++++ b/vue-app/src/components/EntryScreen.vue
+@@ -34,6 +34,11 @@ const author = computed(() => custom.value.length
+ axios.get<{ text: string; author: string }[]>('/api/v1/auth/quotes').then((r) => { custom.value = r.data }).catch(() => {})
+ 
+ const password = ref('')
++// Логін запамʼятовуємо — щодня вводити лише пароль. Приймальнику логін не потрібен (лише PIN).
++function storedLogin(): string {
++  try { return localStorage.getItem('bt_login') ?? '' } catch { return '' }
++}
++const login = ref(storedLogin())
+ const error = ref('')
+ const busy = ref(false)
+ const shake = ref(false)
+@@ -52,8 +57,9 @@ async function submit() {
+   busy.value = true
+   error.value = ''
+   try {
+-    const r = await axios.post<{ role: string }>('/api/v1/auth/login', { password: password.value },
++    const r = await axios.post<{ role: string }>('/api/v1/auth/login', { login: login.value.trim(), password: password.value },
+       { headers: { 'X-Lang': lang.value } })
++    try { if (r.data.role === 'admin') localStorage.setItem('bt_login', login.value.trim()) } catch { /* ignore */ }
+     leave(r.data.role)
+   } catch (e) {
+     const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+@@ -93,16 +99,21 @@ onBeforeUnmount(() => window.clearTimeout(timer))
+ 
+       <form v-if="needPassword" class="login" :class="{ shake }" @submit.prevent="submit" @click.stop
+         @animationend="shake = false">
++        <div class="field user" :class="{ err: !!error }">
++          <q-icon name="person" size="18px" class="lock" />
++          <input v-model="login" type="text" :placeholder="t('entry.login')" autocomplete="username" autocapitalize="off"
++            spellcheck="false" :aria-label="t('entry.login')" @input="error = ''" />
++        </div>
+         <div class="field" :class="{ err: !!error }">
+           <q-icon name="lock" size="18px" class="lock" />
+-          <input ref="input" v-model="password" type="password" :placeholder="receiverMode ? t('entry.passwordOrPin') : t('entry.password')"
++          <input ref="input" v-model="password" type="password" :placeholder="t('entry.password')"
+             autocomplete="current-password" :aria-label="t('entry.password')" @input="error = ''" />
+           <button type="submit" class="go" :disabled="!password || busy" :aria-label="t('entry.enter')">
+             <q-spinner v-if="busy" size="18px" />
+             <q-icon v-else name="arrow_forward" size="20px" />
+           </button>
+         </div>
+-        <div class="err-msg">{{ error }}</div>
++        <div class="err-msg">{{ error || (receiverMode ? t('entry.pinHint') : '') }}</div>
+       </form>
+       <button v-else type="button" class="start" @click.stop="leave()">{{ t('entry.enter') }}</button>
+     </main>
+@@ -182,6 +193,7 @@ onBeforeUnmount(() => window.clearTimeout(timer))
+ }
+ .field:focus-within { border-color: rgba(245, 184, 0, 0.7); box-shadow: 0 0 0 4px rgba(245, 184, 0, 0.12); background: rgba(255, 255, 255, 0.07); }
+ .field.err { border-color: rgba(255, 107, 107, 0.8); }
++.field.user { margin-bottom: 8px; padding-right: 16px; }
+ .lock { color: #8A857C; }
+ .field input {
+   flex: 1; min-width: 0; height: 100%; background: transparent; border: 0; outline: 0;
+@@ -195,6 +207,8 @@ onBeforeUnmount(() => window.clearTimeout(timer))
+ .go:hover:not(:disabled) { transform: translateX(2px); }
+ .go:disabled { opacity: 0.35; cursor: default; }
+ .err-msg { min-height: 20px; margin-top: 8px; font-size: 13px; color: #FF8E8E; }
++.err-msg:not(:empty) { color: #8A857C; }
++.field.err ~ .err-msg { color: #FF8E8E; }
+ 
+ .start {
+   margin-top: 30px; padding: 12px 28px; border-radius: 14px; border: 0; cursor: pointer;
+diff --git a/vue-app/src/i18n.ts b/vue-app/src/i18n.ts
+index 34a6ea3..592081f 100644
+--- a/vue-app/src/i18n.ts
++++ b/vue-app/src/i18n.ts
+@@ -35,6 +35,8 @@ const uk = {
+   'entry.tap': 'натисніть, щоб увійти',
+   'entry.wrong': 'Невірний пароль',
+   'entry.passwordOrPin': 'Пароль або PIN приймальника',
++  'entry.login': 'Логін',
++  'entry.pinHint': 'Приймальник: логін не потрібен, лише PIN',
+   'rcv.balance': 'Ваш баланс',
+   'rcv.owes': 'Треба заготовити',
+   'rcv.allGood': 'Боргу немає — так тримати',
+@@ -65,6 +67,26 @@ const uk = {
+   'dir.pinSave': 'Задати',
+   'dir.pinRemove': 'Прибрати PIN',
+   'dir.pinBad': 'PIN — від 4 до 8 цифр',
++  'acc.title': 'Акаунт',
++  'acc.menu': 'Акаунт і доступ',
++  'acc.mine': 'Мій акаунт',
++  'acc.mineSub': 'Логін: {login}. Усі дані цього акаунта (пункти, матеріали, звірки) бачите лише ви.',
++  'acc.name': 'Назва',
++  'acc.oldPw': 'Поточний пароль',
++  'acc.newPw': 'Новий пароль (від 6 символів)',
++  'acc.changePw': 'Змінити пароль',
++  'acc.pwChanged': 'Пароль змінено',
++  'acc.list': 'Акаунти',
++  'acc.listSub': 'Кожен акаунт — окремий: свої пункти, приймальники, матеріали й ціни, звірки. Чужих даних не видно, навіть головному.',
++  'acc.main': 'головний',
++  'acc.new': 'Новий акаунт',
++  'acc.login': 'Логін (латиницею)',
++  'acc.password': 'Пароль (від 6 символів)',
++  'acc.create': 'Створити',
++  'acc.created': 'Акаунт створено. Передайте логін і пароль власнику.',
++  'acc.reset': 'Скинути пароль',
++  'acc.resetPrompt': 'Новий пароль для «{name}» (від 6 символів)',
++  'acc.resetDone': 'Пароль змінено',
+   'dir.quotes': 'Цитати на екрані входу',
+   'dir.quotesSub': 'По одній у рядку: «Текст — Автор». Якщо поле порожнє — показується вбудований набір.',
+   'dir.quotesPh': 'Хто всюди — той ніде. — Сенека',
+@@ -235,6 +257,8 @@ const ru: Record<Key, string> = {
+   'entry.tap': 'нажмите, чтобы войти',
+   'entry.wrong': 'Неверный пароль',
+   'entry.passwordOrPin': 'Пароль или PIN приёмщика',
++  'entry.login': 'Логин',
++  'entry.pinHint': 'Приёмщик: логин не нужен, только PIN',
+   'rcv.balance': 'Ваш баланс',
+   'rcv.owes': 'Нужно заготовить',
+   'rcv.allGood': 'Долга нет — так держать',
+@@ -265,6 +289,26 @@ const ru: Record<Key, string> = {
+   'dir.pinSave': 'Задать',
+   'dir.pinRemove': 'Убрать PIN',
+   'dir.pinBad': 'PIN — от 4 до 8 цифр',
++  'acc.title': 'Аккаунт',
++  'acc.menu': 'Аккаунт и доступ',
++  'acc.mine': 'Мой аккаунт',
++  'acc.mineSub': 'Логин: {login}. Все данные этого аккаунта (пункты, материалы, сверки) видите только вы.',
++  'acc.name': 'Название',
++  'acc.oldPw': 'Текущий пароль',
++  'acc.newPw': 'Новый пароль (от 6 символов)',
++  'acc.changePw': 'Сменить пароль',
++  'acc.pwChanged': 'Пароль изменён',
++  'acc.list': 'Аккаунты',
++  'acc.listSub': 'Каждый аккаунт — отдельный: свои пункты, приёмщики, материалы и цены, сверки. Чужих данных не видно, даже главному.',
++  'acc.main': 'главный',
++  'acc.new': 'Новый аккаунт',
++  'acc.login': 'Логин (латиницей)',
++  'acc.password': 'Пароль (от 6 символов)',
++  'acc.create': 'Создать',
++  'acc.created': 'Аккаунт создан. Передайте логин и пароль владельцу.',
++  'acc.reset': 'Сбросить пароль',
++  'acc.resetPrompt': 'Новый пароль для «{name}» (от 6 символов)',
++  'acc.resetDone': 'Пароль изменён',
+   'dir.quotes': 'Цитаты на экране входа',
+   'dir.quotesSub': 'По одной в строке: «Текст — Автор». Если поле пустое — показывается встроенный набор.',
+   'dir.quotesPh': 'Кто везде — тот нигде. — Сенека',
+-- 
+2.43.0
+
