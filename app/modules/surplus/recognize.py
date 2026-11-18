@@ -286,7 +286,9 @@ def key_hint() -> dict:
         "set": bool(k),
         "masked": f"{k[:14]}…{k[-4:]}" if len(k) > 24 else ("…" if k else ""),
         "length": len(k),
-        "looks_like_api_key": k.startswith("sk-ant-api"),
+        # ключі Console: старі «sk-ant-api03-…», нові користувацькі «sk-ant-usr-…» тощо;
+        # токени підписки (oat/ort) для API не годяться
+        "looks_like_api_key": k.startswith("sk-ant-") and not k.startswith(("sk-ant-oat", "sk-ant-ort")),
         "looks_like_oauth": k.startswith("sk-ant-oat") or k.startswith("sk-ant-ort"),
         "was_cleaned": raw != k,
     }

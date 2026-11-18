@@ -328,6 +328,8 @@ def test_api_key_cleanup(monkeypatch):
     h = key_hint()
     assert h["masked"] == "sk-ant-api03-A…xyz9" and h["looks_like_api_key"] and h["was_cleaned"]
     assert k not in str(h)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-usr-176" + "B" * 60 + "qAAA")
+    assert key_hint()["looks_like_api_key"] is True
 
 
 async def test_recognize_check_without_key(client, monkeypatch):
