@@ -8,14 +8,16 @@ import BrandLogo from '@/components/BrandLogo.vue'
 import EntryScreen from '@/components/EntryScreen.vue'
 import AppSettings from '@/components/AppSettings.vue'
 import ReceiverApp from '@/pages/ReceiverApp.vue'
+import Sheet from '@/components/Sheet.vue'
 
 const router = useRouter()
 const tabs = computed(() => [
+  { to: '/', label: t('nav.home'), icon: 'space_dashboard' },
   { to: '/reconcile', label: t('nav.reconcile'), icon: 'compare_arrows' },
-  { to: '/', label: t('nav.overview'), icon: 'insights' },
-  { to: '/shipments', label: t('nav.shipments'), icon: 'local_shipping' },
+  { to: '/shipments', label: t('nav.shipments'), icon: 'history' },
   { to: '/directory', label: t('nav.directory'), icon: 'tune' },
 ])
+const settingsOpen = ref(false)
 
 interface Status { required: boolean; ok: boolean; role: string | null; receiver_mode: boolean }
 
@@ -80,16 +82,16 @@ async function logout() {
       <q-toolbar class="app-toolbar">
         <router-link to="/" class="brand" :aria-label="t('brand')">
           <BrandLogo :size="34" />
-          <span class="brand-word gt-xs">{{ t('brand') }}</span>
+          <span class="brand-word">{{ t('brand') }}</span>
         </router-link>
         <q-space />
-        <nav class="nav gt-xs">
+        <nav v-if="$q.screen.gt.sm" class="nav">
           <router-link v-for="tb in tabs" :key="tb.to" :to="tb.to" class="nav-item" exact-active-class="on">
             <q-icon :name="tb.icon" size="18px" />
             <span>{{ tb.label }}</span>
           </router-link>
         </nav>
-        <q-btn flat round dense icon="tune" class="q-ml-sm" :aria-label="t('settings.title')">
+        <q-btn v-if="$q.screen.gt.sm" flat round dense icon="palette" class="q-ml-sm" :aria-label="t('settings.title')">
           <q-menu anchor="bottom right" self="top right" :offset="[0, 8]">
             <AppSettings :can-logout="status.required" @logout="logout" />
           </q-menu>
@@ -97,14 +99,28 @@ async function logout() {
       </q-toolbar>
     </q-header>
 
-    <q-footer class="lt-sm app-footer">
+    <q-footer v-if="$q.screen.lt.md" class="app-footer">
       <nav class="tabbar">
-        <router-link v-for="tb in tabs" :key="tb.to" :to="tb.to" class="tab" exact-active-class="on">
-          <span class="pill"><q-icon :name="tb.icon" size="22px" /></span>
-          <span class="lbl">{{ tb.label }}</span>
+        <router-link to="/" class="tab" exact-active-class="on">
+          <q-icon name="space_dashboard" size="24px" /><span class="lbl">{{ t('nav.home') }}</span>
         </router-link>
+        <router-link to="/shipments" class="tab" exact-active-class="on">
+          <q-icon name="history" size="24px" /><span class="lbl">{{ t('nav.shipments') }}</span>
+        </router-link>
+        <router-link to="/reconcile" class="fab" :aria-label="t('nav.new')">
+          <q-icon name="add" size="32px" />
+        </router-link>
+        <router-link to="/directory" class="tab" exact-active-class="on">
+          <q-icon name="tune" size="24px" /><span class="lbl">{{ t('nav.directory') }}</span>
+        </router-link>
+        <button type="button" class="tab" @click="settingsOpen = true">
+          <q-icon name="palette" size="24px" /><span class="lbl">{{ t('settings.title') }}</span>
+        </button>
       </nav>
     </q-footer>
+    <Sheet v-model="settingsOpen" :title="t('settings.title')">
+      <AppSettings :can-logout="status.required" class="sheet-settings" @logout="settingsOpen = false; logout()" />
+    </Sheet>
 
     <q-page-container>
       <router-view v-slot="{ Component, route }">
@@ -139,14 +155,23 @@ async function logout() {
 .nav-item.on { background: var(--mg-primary); color: var(--mg-on-primary); }
 
 .app-footer {
-  background: color-mix(in srgb, var(--mg-bg) 88%, transparent);
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--mg-bg) 92%, transparent);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
   border-top: 1px solid var(--mg-border); padding-bottom: env(safe-area-inset-bottom);
 }
-.tabbar { display: grid; grid-template-columns: repeat(4, 1fr); height: 62px; }
-.tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-decoration: none; color: var(--mg-fg-3); }
-.tab .pill { width: 52px; height: 30px; border-radius: 999px; display: grid; place-items: center; transition: background 0.25s, color 0.25s; }
+.tabbar { display: grid; grid-template-columns: 1fr 1fr 76px 1fr 1fr; align-items: center; height: 68px; max-width: 560px; margin: 0 auto; }
+.tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; height: 100%; text-decoration: none;
+  color: var(--mg-fg-3); background: transparent; border: 0; font: inherit; cursor: pointer; transition: color 0.2s; }
 .tab .lbl { font-size: 11px; font-weight: 600; }
 .tab.on { color: var(--mg-fg); }
-.tab.on .pill { background: var(--mg-primary); color: var(--mg-on-primary); }
+.tab.on .q-icon { color: var(--mg-primary); }
+.fab { justify-self: center; width: 60px; height: 60px; margin-top: -26px; border-radius: 20px; display: grid; place-items: center;
+  background: var(--mg-primary); color: var(--mg-on-primary); text-decoration: none;
+  box-shadow: 0 10px 24px -8px color-mix(in srgb, var(--mg-primary) 70%, transparent), 0 0 0 5px var(--mg-bg-2);
+  transition: transform 0.2s cubic-bezier(0.2, 1.4, 0.4, 1); }
+.fab:active { transform: scale(0.92); }
+.sheet-settings { width: 100% !important; padding: 0 !important; }
+@media (max-width: 1023px) {
+  .app-toolbar { min-height: 54px; }
+}
 </style>
